@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <cuda_runtime.h>
 
+#include <curand_kernel.h>
+
 #include <iostream>
 #include <cmath>
 #include <limits>
@@ -414,6 +416,15 @@ __device__ double dlib_line_search(rosen_fun fun, rosen_der der, double f0, doub
     return alpha;
 }// end dlib_line_search
 
+__device__ double generate_random_double(unsigned int seed)
+{
+    curandState state;
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    curand_init(seed, idx, 0, &state); // initialize cuRAND with unique sequence number
+
+    return -5 + (5 + 5) * curand_uniform_double(&state); // return scaled double
+}
+
 __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N,int dim) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
@@ -443,12 +454,11 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
     double d0 = 0;
 
     initialize_identity_matrix(H, dim);
-    //printf("past identity");
 
     for (int i = 0; i < dim; ++i) {
+        //x[i] = generate_random_double(seed + idx);// devicePoints[i * dim + idx];
         x[i] = devicePoints[i * dim + idx];
-        //printf("x[%d] = ",idx);
-	//printf(" %f ", x[i]);
+	//printf("x[%d] = %f",idx, x[i]);
     }
     
     double f0 = rosenbrock_device(x, dim);
@@ -486,10 +496,8 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
 	// large sigma = need greater improvement in gradient which means more stable convergence
         // potentially making the search slower
 	alpha = dlib_line_search(rosenbrock_device, rosenbrock_gradient_device, f0, d0, 0.17, 0.87, min_f, max_iter, x, p, lambda, dim);
-    // Use the alpha obtained from the line search
-	//printf("new step size = %f", alpha);
+        // use the alpha obtained from the line search
 	if(!valid(alpha)) {
-	    //printf("alpha not valid, reset to 1.0");
 	    alpha = 1.0;
 	}
 	if(alpha < min_alpha)
@@ -500,36 +508,34 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
 	// update current point x by taking a step size of alpha in the direction p
 	for (int i = 0; i < dim; ++i) {
             x_new[i] = x[i] + alpha * p[i];
-            //printf("new x val = %f ", x_new[i]);
 	}
  
-    // get the new gradient g_new at x_new
-    rosenbrock_gradient_device(x_new, g_new, dim);
+        // get the new gradient g_new at x_new
+        rosenbrock_gradient_device(x_new, g_new, dim);
 
-    // calculate new delta_x and delta_g
-    for (int i = 0; i < dim; ++i) {
-        delta_x[i] = x_new[i] - x[i]; // differentce between he new point and old point
-        delta_g[i] = g_new[i] - g[i]; // difference in gradient at the new point vs old point
-    }
+        // calculate new delta_x and delta_g
+        for (int i = 0; i < dim; ++i) {
+            delta_x[i] = x_new[i] - x[i]; // differentce between he new point and old point
+            delta_g[i] = g_new[i] - g[i]; // difference in gradient at the new point vs old point
+        }
 
-    // bfgs update on H
-    delta_dot = dot_product_device(delta_x, delta_g, dim);
-    if (fabs(delta_dot) <= 1e-7) {
-    if (alpha == min_alpha)
-		alpha *= 2.5;
-    else
+	// calculate the the dot product between the change in x and change in gradient using new point
+        delta_dot = dot_product_device(delta_x, delta_g, dim);
+        if (fabs(delta_dot) <= 1e-7) {
+            if (alpha == min_alpha)
+	        alpha *= 2.5;
+            else
 		alpha = 0.5;
-    //printf("alpha changed to %f ", alpha);
-    vector_scale(p, alpha, new_direction, dim);
-    vector_add(new_direction, x, x_new, dim);
-    if (early_stopping < 10)
-        early_stopping++;
-    else {
-		//printf("\nearly stopping trigered");
+            // calculate new direction using new alpha
+	    vector_scale(p, alpha, new_direction, dim);
+            vector_add(new_direction, x, x_new, dim);
+            if (early_stopping < 10)
+                early_stopping++;
+            else
 		break;
-    }
-	}
+	}//end if deltadot too small
 
+	// bfgs update on H
 	bfgs_device(H, delta_x, delta_g, delta_dot, dim);
 
         // only update x and g for next iteration if the new minima is smaller than previous
@@ -544,7 +550,6 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
     //printf("\nmax iterations reached, predicted minima = %f\n", minima);
     deviceResults[idx] = minima;
 }// end optimizerKernel
-
 
 } // end of namespace cuda
 
@@ -567,6 +572,27 @@ bool readDoublesFromFile(const char* filename, double* data, int N) {
     return true;
 }
 
+const int doublesPerThread = 1024;
+
+__global__ void setup_states(curandState *state, int n) {
+    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    if (id < n) {
+        curand_init(1234, id, 0, &state[id]);
+    }
+}
+
+__global__ void generate_random_doubles(curandState *state, double *out, int n) {
+    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int startIdx = id * doublesPerThread;
+    if (startIdx < n) {
+        for (int i = 0; i < doublesPerThread && (startIdx + i) < n; i++) {
+            
+            out[startIdx + i] = -5 + (5 + 5) * curand_uniform_double(&state[id]);
+        }
+    }
+}
+
+
 cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     dim3 blockSize(128); // Use 128 threads per block as Dr. Zubair told me
     dim3 numBlocks((N + blockSize.x - 1) / blockSize.x); // make sure all instances are covered
@@ -581,17 +607,37 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
-    double* hostPoints = new double[N * dim];
-    const char* filename = "randomNumbers.bin";
     
-    if (!readDoublesFromFile(filename, hostPoints, N*dim)) {
- 	delete[] hostPoints;
-        return cudaErrorUnknown;
-    } else {
-	printf("Data file read with %d points\n",N*dim);
-    }
+    cudaEvent_t startgen, stopgen;
+    cudaEventCreate(&startgen);
+    cudaEventCreate(&stopgen);
 
+    int threads4generation = (N + doublesPerThread - 1) / doublesPerThread;
+    double *hostPoints;
+    curandState *states;
+    
+    cudaMalloc(&hostPoints, N * dim * sizeof(double));
+    cudaMalloc(&states, threads4generation * sizeof(curandState));
+
+    int genblocksize = 128;
+    int genBlocks = (threads4generation + genblocksize - 1) / genblocksize;
+    printf("random double generation starting...\n");
+
+    cudaEventRecord(startgen);
+    setup_states<<<genBlocks, genblocksize>>>(states, threads4generation);
+    generate_random_doubles<<<genBlocks, genblocksize>>>(states, hostPoints, N);
+    cudaDeviceSynchronize(); // wait till all threads finish;
+    cudaEventRecord(stopgen);
+    cudaEventSynchronize(stopgen);
+
+    cudaFree(states);
+    
+    float mill = 0;
+    cudaEventElapsedTime(&mill, startgen, stopgen);
+    printf("%d doubles generated in %f ms \n", N*dim, mill);
+
+    cudaEventDestroy(startgen);
+    cudaEventDestroy(stopgen);
     cudaError_t allocStatus = cudaMalloc(&devicePoints, N * dim * sizeof(double));
     if (allocStatus != cudaSuccess) return allocStatus;
     allocStatus = cudaMalloc(&deviceResults, N * sizeof(double));
@@ -665,14 +711,10 @@ int partition(double arr[], int low, int high) {
     for (int j = low; j < high; j++) {
         if (arr[j] < pivot) {
             i++;
-            double tmp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = tmp;
+            swap(&arr[i], &arr[j]);
         }
     }
-    double tmp = arr[i + 1];
-    arr[i + 1] = arr[high];
-    arr[high] = tmp;
+    swap(&arr[i + 1], &arr[high]);
     return i + 1;
 }
 
@@ -696,37 +738,34 @@ void runOptimizationKernel(double* hostResults, int N, int dim) {
     } else {
         printf("\nSuccess!! No Error!\n");
     }
-
-    //quickSort(hostResults, 0, N - 1);
-    //printf("after sorting the array: \n");    
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    printf("Sorting the array with %d elements... ", N);  
+    cudaEventRecord(start);
+    quickSort(hostResults, 0, N - 1);
+    cudaEventRecord(stop);
+    float milli = 0;
+    cudaEventElapsedTime(&milli, start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    printf("took %f ms\n",  milli);    
 
     printf("first 20 function values in hostResults\n");
     for(int i=0;i<20;i++) {
        printf(" %f ",hostResults[i]);
     }
     printf("\n");
-
-}
-double square(double x){ return x*x;}
-
-double rosenbrock(double* x, int dim) {
-    double sum = 0.0;
-    for(size_t i=0;i<dim;++i) {
-        sum += 100 * square(x[i+1] - square(x[i])) + square(1 - x[i]);
-    }
-    return sum;
+//cudaMemGetInfo
 }
 
 int main() {
-    //const char* filename = "randomNumbers.bin";
-
-    const int N = 1024*128;
+    const size_t N = 1024*1024*512;
     const int dim = 2;
-    double hostResults[N];
+    double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << std::endl;
 
-    double x0[2] = {5.0, 5.0};
-    double f0 = rosenbrock(x0, dim);    
+    double f0 = 333777; //sum big  
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
@@ -735,4 +774,3 @@ int main() {
 
     return 0;
 }
-
