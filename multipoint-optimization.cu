@@ -8,6 +8,170 @@
 #include <limits>
 #include <stdexcept>
 #include <fstream>
+#include <math.h>
+
+//#include <math_functions.h>
+
+namespace dual {
+
+class DualNumber {
+public:
+    double real;
+    double dual;
+
+    __host__ __device__ DualNumber(double real = 0.0, double dual = 0.0) : real(real), dual(dual) {}
+
+    __host__ __device__ DualNumber& operator+=(const DualNumber& rhs) {
+        real += rhs.real;
+        dual += rhs.dual;
+        return *this;
+    }
+
+    __host__ __device__ DualNumber operator+(const DualNumber& rhs) const {
+        return DualNumber(real + rhs.real, dual + rhs.dual);
+    }
+    __host__ __device__ DualNumber operator+(const double& rhs) const {
+        return DualNumber(real + rhs, dual);
+    }
+    // 
+    __host__ __device__ DualNumber operator-(const DualNumber& rhs) const {
+        return DualNumber(real - rhs.real, dual - rhs.dual);
+    }
+
+    // DualNumber - double
+    __host__ __device__ DualNumber operator-(const double& rhs) const {
+        return DualNumber(real - rhs, dual);
+    }
+
+    __host__ __device__ DualNumber operator*(const DualNumber& rhs) const {
+        return DualNumber(real * rhs.real, dual * rhs.real + real * rhs.dual);
+    }
+    // Overloaded operator to multiply a DualNumber by a double
+    __host__ __device__ DualNumber operator*(const double& rhs) const {
+        return DualNumber(real * rhs, dual * rhs);
+    }
+    // Overloaded operator to divide a DualNumber by a double
+    __host__ __device__ DualNumber operator/(const double& rhs) const {
+        return DualNumber(real / rhs, dual / rhs);
+    }
+
+    __host__ __device__ DualNumber operator/(const DualNumber& rhs) const {
+        double denom = rhs.real * rhs.real;
+        return DualNumber(real / rhs.real, (dual * rhs.real - real * rhs.dual) / denom);
+    }
+    friend __host__ __device__ DualNumber operator+(const double& lhs, const DualNumber& rhs) {
+        return DualNumber(lhs + rhs.real, rhs.dual);
+    }
+
+    friend __host__ __device__ DualNumber operator-(const double& lhs, const DualNumber& rhs) {
+        return DualNumber(lhs - rhs.real, -rhs.dual);
+    }
+
+    friend __host__ __device__ DualNumber operator*(const double& lhs, const DualNumber& rhs) {
+        return DualNumber(lhs * rhs.real, lhs * rhs.dual);
+    }
+
+};
+
+// Trigonometric and other standard functions
+__host__ __device__ DualNumber sin(const DualNumber& x) {
+    return DualNumber(sinf(x.real), x.dual * cosf(x.real));
+}
+
+__host__ __device__ DualNumber cos(const DualNumber& x) {
+    return DualNumber(cosf(x.real), -x.dual * sinf(x.real));
+}
+
+
+__device__ double cos(double x) {
+    return cosf(x);  // Using the cos function from CUDA's device math library
+}
+
+__host__ __device__ DualNumber exp(const DualNumber& x) {
+    double ex = expf(x.real);
+    return DualNumber(ex, x.dual * ex);
+}
+
+__host__ __device__ DualNumber sqrt(const DualNumber& x) {
+    double sr = sqrtf(x.real);
+    return DualNumber(sr, x.dual / (2.0 * sr));
+}
+
+__host__ __device__ DualNumber atan2(const DualNumber& y, const DualNumber& x) {
+    double denom = x.real * x.real + y.real * y.real;
+    return DualNumber(atan2f(y.real, x.real), (x.real * y.dual - y.real * x.dual) / denom);
+}
+
+template<typename T>
+__host__ __device__ T pow(const T& base, double exponent) {
+    return T(powf(base.real, exponent), exponent * powf(base.real, exponent - 1) * base.dual);
+}
+
+__device__ double pow2(double x) {
+    return x * x;
+}
+
+//template<int DIM>
+__device__ DualNumber rosenbrock(const DualNumber* x, int n) {
+    DualNumber result(0.0, 0.0);
+    for (int i = 0; i < n - 1; ++i) {
+        DualNumber t1 = x[i + 1] - x[i] * x[i];
+        DualNumber t2 = 1.0 - x[i];
+        result += 100.0 * t1 * t1 + t2 * t2;
+    }
+    return result;
+}
+
+__device__ double rosenbrock(const double* x, int n) {
+    double sum = 0.0;
+    for (int i = 0; i < n - 1; ++i) {
+        sum += 100 * pow2(x[i + 1] - pow2(x[i])) + pow2(1-x[i]);
+    }
+
+    return sum;
+}
+
+__device__ DualNumber rastrigin(const DualNumber* x, int n) {
+    const double A = 10.0;
+    DualNumber sum(A * n, 0.0);
+
+    for (int i = 0; i < n; ++i) {
+        DualNumber xi = x[i];
+	DualNumber xi_squared = xi * xi;
+	DualNumber cos_term = cos(2 * M_PI * xi);
+        sum += (xi_squared - A * cos_term);
+    }
+    return sum;
+}
+
+__device__ double rastrigin(const double* x, int n) {
+    const double A = 10.0;
+    double sum = A * n;
+
+    for (int i = 0; i < n; ++i) {
+        double xi = x[i];
+        double xi_squared = xi * xi;
+        double cos_term = cos(2 * M_PI * xi);
+        sum += (xi_squared - A * cos_term);
+    }
+    return sum;
+}
+
+
+__host__ __device__ DualNumber woods(const DualNumber* x, int n) {
+    // Assuming n is at least 4 for the Woods function
+    DualNumber sum = DualNumber(0.0);
+    sum += DualNumber(100.0) * pow(x[1] - x[0] * x[0], 2);
+    sum += pow(DualNumber(1.0) - x[0], 2);
+    sum += DualNumber(90.0) * pow(x[3] - x[2] * x[2], 2);
+    sum += pow(DualNumber(1.0) - x[2], 2);
+    sum += DualNumber(10.0) * pow(x[1] + x[3] - DualNumber(2.0), 2);
+    sum += DualNumber(0.1) * pow(x[1] - x[3], 2);
+    return sum;
+}
+
+} // end of dual namespace
+
 
 namespace cuda {
 
@@ -32,18 +196,12 @@ __device__ void outer_product_device(const double* v1, const double* v2, double*
     }
 }
 
-__device__ void vector_subtract(const double* a, const double* b, double* result, int size) {
-    for (int i = 0; i < size; ++i) {
-        result[i] = a[i] - b[i];
-    }
-}
 
 __device__ void vector_add(const double* a, const double* b, double* result, int size) {
     for (int i = 0; i < size; ++i) {
         result[i] = a[i] + b[i];
     }
 }
-
 
 __device__ void vector_scale(const double* a, double scalar, double* result, int dim) {
     for (int i = 0; i < dim; ++i) {
@@ -70,30 +228,30 @@ __device__ bool valid(double x) {
 }
 
 
-__device__ double pow2(double x) {
-    return x * x;
-}
+template <int DIM>
+struct ManagedArray {
+    double* data;
 
-typedef double (*rosen_fun)(double* x, int n);
-typedef void (*rosen_der)(double* x, double* g, int n);
-
-__device__ double rosenbrock_device(double* x, int n) {
-    double sum = 0.0;
-    for (int i = 0; i < n - 1; ++i) {
-        sum += 100 * pow2(x[i + 1] - pow2(x[i])) + pow2(1-x[i]);
+    __host__ ManagedArray() {
+        cudaMallocManaged(&data, DIM * sizeof(double));
     }
 
-    return sum;
-}
-
-__device__ void rosenbrock_gradient_device(double* x, double* grad, int n) {
-    grad[0] = -2 * (1 - x[0]) - 400 * x[0] * (x[1] - pow2(x[0]));
-    for (size_t i = 1; i < n - 1; ++i) {
-        grad[i] = -2 * (1 - x[i]) + 200 * (x[i] - pow2(x[i - 1])) - 400 * x[i] * (x[i + 1] - pow2(x[i]));
+    __host__ __device__ double& operator[](int idx) {
+        return data[idx];
     }
-    grad[n - 1] = 200 * (x[n - 1] - pow2(x[n - 2]));
-}
 
+    __host__ __device__ double* begin() {
+        return data;
+    }
+
+    __host__ __device__ double* end() {
+        return data + DIM;
+    }
+
+    __host__ ~ManagedArray() {
+        cudaFree(data);
+    }
+};
 
 __device__ void initialize_identity_matrix_device(double* H, int n) {
     for (int i = 0; i < n; ++i) {
@@ -103,8 +261,9 @@ __device__ void initialize_identity_matrix_device(double* H, int n) {
     }
 }
 
+template<int DIM>
 __device__ void bfgs_device(double* H, double* delta_x, double* delta_g, double delta_dot, int n) {
-    const int dim = 2;
+    //const int dim = 4;
     if (fabs(delta_dot) < 1e-10) return;  // protect against division by zero
     
     double yt_s = 1.0 / delta_dot; // y^T 
@@ -114,20 +273,63 @@ __device__ void bfgs_device(double* H, double* delta_x, double* delta_g, double 
         return;
     }
 
-    double term1[dim * dim]; // s y^T
-    double term2[dim * dim]; // y s^T
-    double term3[dim * dim]; // s s^T
+    double term1[DIM * DIM]; // s y^T
+    double term2[DIM * DIM]; // y s^T
+    double term3[DIM * DIM]; // s s^T
 
-    outer_product_device(delta_x, delta_g, term1, n);
-    outer_product_device(delta_g, delta_x, term2, n);
-    outer_product_device(delta_x, delta_x, term3, n);
+    outer_product_device(delta_x, delta_g, term1, DIM);
+    outer_product_device(delta_g, delta_x, term2, DIM);
+    outer_product_device(delta_x, delta_x, term3, DIM);
 
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            int index = i * n + j;
+    for (int i = 0; i < DIM; ++i) {
+        for (int j = 0; j < DIM; ++j) {
+            int index = i * DIM + j;
             double I_ij = (i == j) ? 1.0 : 0.0;
             H[index] = (I_ij - term1[index] * yt_s) * H[index] * (I_ij - term2[index] * yt_s) + term3[index] * yt_s;
         }
+    }
+}
+
+template<int DIM>
+struct RosenbrockFunctor {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return dual::rosenbrock(x, DIM);
+    }
+
+    __device__ static double evaluate(const double* x) {
+	return dual::rosenbrock(x, DIM);
+    }
+};
+
+template<int DIM>
+struct Rastrigin {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return dual::rastrigin(x, DIM);
+    }
+
+    __device__ static double evaluate(const double* x) {
+        return dual::rastrigin(x, DIM);
+    }
+};
+
+
+template<typename Function, int DIM>
+__device__ void calculateGradientUsingAD(double *x, double *gradient) {
+    dual::DualNumber xDual[DIM];
+    dual::DualNumber result;
+
+    for (int i = 0; i < DIM; ++i) { // // iterate through each dimension (vairbale)
+        xDual[i] = dual::DualNumber(x[i], 0.0);
+    }
+
+    // calculate the partial derivative of  each dimension
+    for (int i = 0; i < DIM; ++i) {
+        xDual[i].dual = 1.0; // set dual part for derivative calculation
+
+        result = Function::evaluate(xDual); // evaluate the function using AD
+        gradient[i] = result.dual; // store derivative
+
+        xDual[i].dual = 0.0;
     }
 }
 
@@ -238,8 +440,8 @@ __device__ double poly_min_extrap(double f0, double d0, double x1, double f_x1, 
     return put_in_range(0.0, x2, solution);
 }
 
-
-__device__ double dlib_line_search(rosen_fun fun, rosen_der der, double f0, double d0, double rho, double sigma, double min_f, int max_iter, double *x, double *p, double lambda, int dim)
+template<typename Function, int DIM>
+__device__ double dlib_line_search(double f0, double d0, double rho, double sigma, double min_f, int max_iter, double *x, double *p, double lambda)
 {
     if (!(0 < rho && rho < sigma && sigma < 1 && max_iter > 0)) {
         printf("Invalid arguments provided to line_search\n");
@@ -279,20 +481,20 @@ __device__ double dlib_line_search(rosen_fun fun, rosen_der der, double f0, doub
     const double thresh = fabs(sigma * d0);
 
     unsigned long itr = 0;
-    double x_alpha[2];
-    double g[2];
+    double x_alpha[DIM];
+    double g[DIM];
     
     // do the bracketing stage to find the bracket range [a,b]
     while (true) {
         ++itr;
-        for (int i = 0; i < dim; ++i) {
+        for (int i = 0; i < DIM; ++i) {
             x_alpha[i] = x[i] + alpha * p[i];
         }
-        const double val = fun(x_alpha, dim);
-        der(x_alpha, g, dim);
-
-        const double val_der = directional_derivative(g, p, dim);
-        
+        const double val = Function::evaluate(x);//fun(x_alpha, dim);
+        //der(x_alpha, g, dim);
+	//Function::gradient(x_alpha, g, DIM);
+        calculateGradientUsingAD<Function, DIM>(x_alpha, g);
+	const double val_der = directional_derivative(g, p, DIM);
 	// we are done with the line search since we found a value smaller
 	// than the minimum f value
 	if (val <= min_f) {
@@ -360,12 +562,14 @@ __device__ double dlib_line_search(rosen_fun fun, rosen_der der, double f0, doub
         alpha = a + (b-a)*poly_min_extrap(a_val, a_val_der, b_val, b_val_der);
         alpha = put_in_range(first,last,alpha);
 
-        for (int i = 0; i < dim; ++i) {
+        for (int i = 0; i < DIM; ++i) {
             x_alpha[i] = x[i] + alpha * p[i];
         }
-        const double val = fun(x_alpha, dim);
-        der(x_alpha, g, dim);
-	const double val_der = directional_derivative(g,p,dim);
+        const double val = Function::evaluate(x);
+	//Function::evaluate(x, DIM);
+        calculateGradientUsingAD<Function, DIM>(x, g);
+        //Function::gradient(x, g, DIM);// fun(x_alpha, dim);
+	const double val_der = directional_derivative(g,p,DIM);
 
         // we are done with the line search since we found a value smaller
         // than the minimum f value or we ran out of iterations.
@@ -416,6 +620,9 @@ __device__ double dlib_line_search(rosen_fun fun, rosen_der der, double f0, doub
     return alpha;
 }// end dlib_line_search
 
+
+} // cuda namespace end
+
 __device__ double generate_random_double(unsigned int seed)
 {
     curandState state;
@@ -425,15 +632,39 @@ __device__ double generate_random_double(unsigned int seed)
     return -5 + (5 + 5) * curand_uniform_double(&state); // return scaled double
 }
 
-__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N,int dim) {
+struct Rosenbrock {
+    static __device__ double evaluate(double* x, int n) {
+        double sum = 0.0;
+        for (int i = 0; i < n - 1; ++i) {
+            sum += 100 * (x[i + 1] - x[i] * x[i]) * (x[i + 1] - x[i] * x[i]) + (1 - x[i]) * (1 - x[i]);
+        }
+        return sum;
+    }
+
+    static __device__ void gradient(double* x, double* grad, int n) {
+        for (int i = 0; i < n; ++i) {
+            if (i < n - 1) {
+                grad[i] = -400 * x[i] * (x[i + 1] - x[i] * x[i]) - 2 * (1 - x[i]);
+            }
+            if (i > 0) {
+                grad[i] += 200 * (x[i] - x[i - 1] * x[i - 1]);
+            }
+        }
+    }
+};
+
+
+
+template<typename Function, int DIM>
+__global__ void optimizeKernel(double* deviceResults, int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
 
     int early_stopping = 0;
-    double H[2 * 2];
-    double g[2], x[2], x_new[2], p[2], g_new[2], delta_x[2], delta_g[2], new_direction[2];
-    for (int i = 0; i < 4; i++) H[i] = 0;
-    for (int i = 0; i < 2; i++) {
+    double H[DIM * DIM];
+    double g[DIM], x[DIM], x_new[DIM], p[DIM], g_new[DIM], delta_x[DIM], delta_g[DIM], new_direction[DIM];
+    for (int i = 0; i < DIM; i++) H[i] = 0;
+    for (int i = 0; i < DIM; i++) {
         g[i] = 0;
         x[i] = 0;
         x_new[i] = 0;
@@ -453,32 +684,33 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
     double alpha = 1.0;
     double d0 = 0;
 
-    initialize_identity_matrix(H, dim);
+    unsigned int seed = 1234;
 
-    for (int i = 0; i < dim; ++i) {
-        //x[i] = generate_random_double(seed + idx);// devicePoints[i * dim + idx];
-        x[i] = devicePoints[i * dim + idx];
-	//printf("x[%d] = %f",idx, x[i]);
+    for (int i = 0; i < DIM; ++i) {
+        x[i] = generate_random_double(seed + idx);// devicePoints[i * dim + idx];
+        //x[i] = devicePoints[i * DIM + idx];
+        //printf("x[%d] = %f",idx, x[i]);
     }
-    
-    double f0 = rosenbrock_device(x, dim);
+    double f0 = Function::evaluate(x);
+    deviceResults[idx] = f0;//Function::evaluate(x);
+    cuda::calculateGradientUsingAD<Function, DIM>(x, g);//dual::dualrosenbrock);
+    double f0f = Function::evaluate(x);
     if (idx == 0) {
-       printf("\n\nf0 = %f", f0);
+       printf("\n\nf0 = %f f0f = %f", f0, f0f);
     }
 
     
     for (int iter = 0; iter < 25; ++iter) {
-	//printf("idx = %d", idx);
-	//printf("x[0] = %f", x[0]);
-	//printf("\nit#%d\n",iter);
-	rosenbrock_gradient_device(x, g, dim);
+	//Function::gradient(x, g, DIM);
+	cuda::calculateGradientUsingAD<Function, DIM>(x, g);
+	//rosenbrock_gradient_device(x, g, DIM);
         d0 = 0.0;
         // compute the search direction p = -H * g
-        for (int i = 0; i < dim; ++i) {
+        for (int i = 0; i < DIM; ++i) {
             //printf("\ng[%d] = %f ",i,g[i]);
        	    p[i] = 0.0;
-            for (int j = 0; j < dim; ++j) {
-                p[i] -= H[i * dim + j] * g[j]; // i * dim + j since H is flattened arr[]
+            for (int j = 0; j < DIM; ++j) {
+                p[i] -= H[i * DIM + j] * g[j]; // i * dim + j since H is flattened arr[]
             }    
 	    d0 += g[i] * p[i]; // get current directional derivatives d0 while we at it
         }
@@ -495,9 +727,9 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
 	// small sigma = accept alpha that don't significantly change the gradient
 	// large sigma = need greater improvement in gradient which means more stable convergence
         // potentially making the search slower
-	alpha = dlib_line_search(rosenbrock_device, rosenbrock_gradient_device, f0, d0, 0.17, 0.87, min_f, max_iter, x, p, lambda, dim);
+	alpha = cuda::dlib_line_search<Function, DIM>(f0, d0, 0.17, 0.87, min_f, max_iter, x, p, lambda);
         // use the alpha obtained from the line search
-	if(!valid(alpha)) {
+	if(!cuda::valid(alpha)) {
 	    alpha = 1.0;
 	}
 	if(alpha < min_alpha)
@@ -506,29 +738,30 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
      	    alpha = max_alpha;
 	
 	// update current point x by taking a step size of alpha in the direction p
-	for (int i = 0; i < dim; ++i) {
+	for (int i = 0; i < DIM; ++i) {
             x_new[i] = x[i] + alpha * p[i];
 	}
  
         // get the new gradient g_new at x_new
-        rosenbrock_gradient_device(x_new, g_new, dim);
-
-        // calculate new delta_x and delta_g
-        for (int i = 0; i < dim; ++i) {
+        //rosenbrock_gradient_device(x_new, g_new, DIM);
+        //Function::gradient(x_new, g_new, DIM);
+	cuda::calculateGradientUsingAD<Function, DIM>(x_new, g_new);
+	// calculate new delta_x and delta_g
+        for (int i = 0; i < DIM; ++i) {
             delta_x[i] = x_new[i] - x[i]; // differentce between he new point and old point
             delta_g[i] = g_new[i] - g[i]; // difference in gradient at the new point vs old point
         }
 
 	// calculate the the dot product between the change in x and change in gradient using new point
-        delta_dot = dot_product_device(delta_x, delta_g, dim);
+        delta_dot = cuda::dot_product_device(delta_x, delta_g, DIM);
         if (fabs(delta_dot) <= 1e-7) {
             if (alpha == min_alpha)
 	        alpha *= 2.5;
             else
 		alpha = 0.5;
             // calculate new direction using new alpha
-	    vector_scale(p, alpha, new_direction, dim);
-            vector_add(new_direction, x, x_new, dim);
+	    cuda::vector_scale(p, alpha, new_direction, DIM);
+	    cuda::vector_add(new_direction, x, x_new, DIM);
             if (early_stopping < 10)
                 early_stopping++;
             else
@@ -536,64 +769,23 @@ __global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N
 	}//end if deltadot too small
 
 	// bfgs update on H
-	bfgs_device(H, delta_x, delta_g, delta_dot, dim);
+	cuda::bfgs_device<DIM>(H, delta_x, delta_g, delta_dot, DIM);
 
         // only update x and g for next iteration if the new minima is smaller than previous
-	double min = rosenbrock_device(x_new, dim);
+	double min = Function::evaluate(x_new);//rosenbrock_device(x_new, DIM);
         if (min < minima) {
-	    for(int i=0; i<dim; ++i)
+	    for(int i=0; i<DIM; ++i)
 		x[i] = x_new[i];
 	    minima = min;
 	}
     }// end outer for
-    minima = rosenbrock_device(x, dim);
+    minima = Function::evaluate(x);//rosenbrock_device(x, DIM);
     //printf("\nmax iterations reached, predicted minima = %f\n", minima);
     deviceResults[idx] = minima;
 }// end optimizerKernel
 
-} // end of namespace cuda
-
-
-bool readDoublesFromFile(const char* filename, double* data, int N) {
-    std::ifstream inFile(filename, std::ios::binary);
-    if (!inFile) {
-        std::cerr << "Failed to open file for reading.\n";
-        return false;
-    }
-
-    inFile.read(reinterpret_cast<char*>(data), N * sizeof(double));
-    if (inFile.gcount() != N * sizeof(double)) {
-        std::cerr << "Failed to read the expected number of doubles.\n";
-        inFile.close();
-        return false;
-    }
-
-    inFile.close();
-    return true;
-}
-
-const int doublesPerThread = 1024;
-
-__global__ void setup_states(curandState *state, int n) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
-    if (id < n) {
-        curand_init(1234, id, 0, &state[id]);
-    }
-}
-
-__global__ void generate_random_doubles(curandState *state, double *out, int n) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
-    int startIdx = id * doublesPerThread;
-    if (startIdx < n) {
-        for (int i = 0; i < doublesPerThread && (startIdx + i) < n; i++) {
-            
-            out[startIdx + i] = -5 + (5 + 5) * curand_uniform_double(&state[id]);
-        }
-    }
-}
-
-
-cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
+template<typename Function, int DIM>
+cudaError_t launchOptimizeKernel(double* hostResults, int N) {
     dim3 blockSize(128); // Use 128 threads per block as Dr. Zubair told me
     dim3 numBlocks((N + blockSize.x - 1) / blockSize.x); // make sure all instances are covered
     cudaDeviceProp prop;
@@ -601,57 +793,21 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     printf("Max threads per block: %d\n", prop.maxThreadsPerBlock);
     printf("Max blocks per grid: %d x %d x %d\n", prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
     double* deviceResults;
-    double* devicePoints;// = generate_random_numbers(N);
     
     // Events for timing
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     
-    cudaEvent_t startgen, stopgen;
-    cudaEventCreate(&startgen);
-    cudaEventCreate(&stopgen);
-
-    int threads4generation = (N + doublesPerThread - 1) / doublesPerThread;
-    double *hostPoints;
-    curandState *states;
-    
-    cudaMalloc(&hostPoints, N * dim * sizeof(double));
-    cudaMalloc(&states, threads4generation * sizeof(curandState));
-
-    int genblocksize = 128;
-    int genBlocks = (threads4generation + genblocksize - 1) / genblocksize;
-    printf("random double generation starting...\n");
-
-    cudaEventRecord(startgen);
-    setup_states<<<genBlocks, genblocksize>>>(states, threads4generation);
-    generate_random_doubles<<<genBlocks, genblocksize>>>(states, hostPoints, N);
-    cudaDeviceSynchronize(); // wait till all threads finish;
-    cudaEventRecord(stopgen);
-    cudaEventSynchronize(stopgen);
-
-    cudaFree(states);
-    
-    float mill = 0;
-    cudaEventElapsedTime(&mill, startgen, stopgen);
-    printf("%d doubles generated in %f ms \n", N*dim, mill);
-
-    cudaEventDestroy(startgen);
-    cudaEventDestroy(stopgen);
-    cudaError_t allocStatus = cudaMalloc(&devicePoints, N * dim * sizeof(double));
-    if (allocStatus != cudaSuccess) return allocStatus;
-    allocStatus = cudaMalloc(&deviceResults, N * sizeof(double));
+    cudaError_t allocStatus = cudaMalloc(&deviceResults, N * sizeof(double));
     if (allocStatus != cudaSuccess) {
-        cudaFree(devicePoints); // deallocate memory if error
         return allocStatus;
     }
-    // copy host points to device points
-    cudaMemcpy(devicePoints, hostPoints, N * dim * sizeof(double), cudaMemcpyHostToDevice);
     // launch the actual kernel in cuda namespace
 
     // timer tightly wrapped around kernel launch
     cudaEventRecord(start);
-    cuda::optimizeKernel<<<numBlocks, blockSize>>>(devicePoints, deviceResults, N, dim);
+    optimizeKernel<Function, DIM><<<numBlocks, blockSize>>>(deviceResults, N);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
@@ -665,7 +821,6 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess) {
         cudaFree(deviceResults);
-        cudaFree(devicePoints);        
         printf("Kernel launch failed: %s\n", cudaGetErrorString(err));
         return err;
     }
@@ -673,7 +828,6 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     if (err != cudaSuccess) {
         printf("Kernel execution failed: %s\n", cudaGetErrorString(err));
         cudaFree(deviceResults);
-        cudaFree(devicePoints);
 	return err;
     }
     
@@ -681,7 +835,6 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         cudaFree(deviceResults);
-        cudaFree(devicePoints);
         return error;
     }
 
@@ -689,14 +842,12 @@ cudaError_t launchOptimizeKernel(double* hostResults, int N, int dim) {
     error = cudaMemcpy(hostResults, deviceResults, N * sizeof(double), cudaMemcpyDeviceToHost);
     if (error != cudaSuccess) {
         cudaFree(deviceResults);
-        cudaFree(devicePoints);
         return error;
     }
     printf("results are copied back to host\n");
 
     // deallocate device memory
     cudaFree(deviceResults);
-    cudaFree(devicePoints);
     return cudaSuccess;
 }
 
@@ -725,14 +876,16 @@ void quickSort(double arr[], int low, int high) {
         quickSort(arr, pi + 1, high);
     }
 }
-void runOptimizationKernel(double* hostResults, int N, int dim) {
+
+template<typename Function, int DIM>
+void runOptimizationKernel(double* hostResults, int N) {
     printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
        printf(" %f ",hostResults[i]);
     }
     printf("\n");
     
-    cudaError_t error = launchOptimizeKernel(hostResults, N, dim);
+    cudaError_t error = launchOptimizeKernel<Function, DIM>(hostResults, N);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
@@ -760,9 +913,9 @@ void runOptimizationKernel(double* hostResults, int N, int dim) {
 }
 
 int main() {
-    const size_t N = 1024*1024*512;
-    const int dim = 2;
-    double hostResults[N];// = new double[N];
+    const size_t N = 1024*1024;
+    double hostResults[N];
+    const int dim = 10;
     std::cout << "number of optimizations = " << N << std::endl;
 
     double f0 = 333777; //sum big  
@@ -770,7 +923,15 @@ int main() {
         hostResults[i] = f0;
     }
 
-    runOptimizationKernel(hostResults, N, dim);
+    runOptimizationKernel<cuda::Rastrigin<dim>, dim>(hostResults, N);
+
+    int countZeros = 0;
+    for (int i = 0; i < N; ++i) {
+	if (std::fabs(hostResults[i]) < 1e-8) {
+            ++countZeros;
+        }
+    }
+    std::cout << "convergence = " << countZeros << std::endl;
 
     return 0;
 }
