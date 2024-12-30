@@ -228,31 +228,6 @@ __device__ bool valid(double x) {
 }
 
 
-template <int DIM>
-struct ManagedArray {
-    double* data;
-
-    __host__ ManagedArray() {
-        cudaMallocManaged(&data, DIM * sizeof(double));
-    }
-
-    __host__ __device__ double& operator[](int idx) {
-        return data[idx];
-    }
-
-    __host__ __device__ double* begin() {
-        return data;
-    }
-
-    __host__ __device__ double* end() {
-        return data + DIM;
-    }
-
-    __host__ ~ManagedArray() {
-        cudaFree(data);
-    }
-};
-
 __device__ void initialize_identity_matrix_device(double* H, int n) {
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -261,6 +236,8 @@ __device__ void initialize_identity_matrix_device(double* H, int n) {
     }
 }
 
+
+// this is not right... we're doing elementwise here, not matmul..
 template<int DIM>
 __device__ void bfgs_device(double* H, double* delta_x, double* delta_g, double delta_dot, int n) {
     //const int dim = 4;
