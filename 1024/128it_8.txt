@@ -1,0 +1,20 @@
+number of optimizations = 8 max_iter = 128 dim = 2
+Rastrigin Function
+
+first 20 hostResults
+ 333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  -1.494844 
+Recommended block size: 896
+
+
+f0 = 63.406521
+Optimization Kernel execution time = 4.542464 ms
+
+Global Minima: 1.489978
+Global Minima Index: 1
+Coordinates associated with Global Minima:
+x[0] = -0.045438
+x[1] = 0.973842
+
+Success!! No Error!
+first 20 function values in hostResults
+ 3.979831  1.489978  8.954601  24.873721  24.873844  8.954601  15.919243  25.868681  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  -0.045438  0.973842  0.000000  0.000000  0.000000  -1.494844 
