@@ -365,10 +365,10 @@ __device__ double line_search(double f0, const double* x, const double* p, const
 
 } // util namespace end
 
-const int MAX_ITER = 64;
+//const int MAX_ITER = 64;
 
 template<typename Function, int DIM, unsigned int blockSize>
-__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N) {
+__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
 //__global__ void optimizeKernel(double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N) {
@@ -527,7 +527,7 @@ __global__ void generate_random_doubles(curandState *state, double *out, int n) 
 
 
 template<typename Function, int DIM>
-cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N) {
+cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER) {
     int blokSize; // The launch configurator returned block size
     int minGridSize; // The minimum grid size needed to achieve maximum occupancy
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blokSize, optimizeKernel<Function, DIM, 128>, 0, 0);
@@ -558,7 +558,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     cudaEventRecord(start);
     
     optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(
-    lower, upper, deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N);
+    lower, upper, deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER);
     //optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(deviceResults, deviceIndices, deviceCoordinates, N);
 
     cudaEventRecord(stop);
@@ -616,7 +616,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     // Write data to file
     // Format:
     // Optimization_Index Step X_0 X_1 ... X_(DIM-1)
-    std::string filename = "optimization_steps_" + std::to_string(MAX_ITER) + ".txt"; 
+    std::string filename = std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
     std::ofstream stepOut(filename);
     stepOut << "OptIndex Step";
     for (int d = 0; d < DIM; d++) {
@@ -678,7 +678,7 @@ void quickSort(double arr[], int low, int high) {
 }
 
 template<typename Function, int DIM>
-void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N) {
+void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
     printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
@@ -686,7 +686,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     }
     printf("\n");
     
-    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N);
+    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
@@ -760,13 +760,16 @@ Parameters parseArguments(int argc, char* argv[]) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <opt_count> <s     teps2take> <dimension>\n";
+    if (argc != 5) {
+	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <number_of_optimizations\n";
         return 1;
     }
     double lower = std::atof(argv[1]);
     double upper = std::atof(argv[2]);   	
-    
+
+    int MAX_ITER = std::stoi(argv[3]);
+    int N = std::stoi(argv[4]);
+
     
     /* Use parsed parameters.
     std::cout << "Parsed Values:\n"
@@ -776,12 +779,12 @@ int main(int argc, char* argv[]) {
               << "max_iter: " << params.max_iter << "\n"
               << "dim: " << params.dim << "\n";
     */
-    const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
+    //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
     const int dim = 2;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
-    std::cout << std::scientific;// << std::setprecision(9);
+    std::cout << std::setprecision(17) << std::scientific;// << std::setprecision(9);
     double f0 = 333777; //sum big  
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
@@ -802,7 +805,7 @@ int main(int argc, char* argv[]) {
         hostResults[i] = f0;
     }
     std::cout << "Rastrigin Function\n"<<std::endl;
-    runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N);
+    runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
     
     return 0;
 }
