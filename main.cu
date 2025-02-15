@@ -616,7 +616,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     // Write data to file
     // Format:
     // Optimization_Index Step X_0 X_1 ... X_(DIM-1)
-    std::string filename = std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
+    std::string filename = std::to_string(MAX_ITER*N)+"/trajectories/"+std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
     std::ofstream stepOut(filename);
     stepOut << "OptIndex Step";
     for (int d = 0; d < DIM; d++) {
@@ -789,16 +789,16 @@ int main(int argc, char* argv[]) {
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
-    /* 
+     
     int indices[N];
     double coordinates[dim];
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
     std::cout << "Rosenbrock Function\n" << std::endl;
-    runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, indices, coordinates, N); 
-    */
-
+    runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, indices, coordinates, N, MAX_ITER); 
+    
+    /*
     int hostIndices[N];
     double hostCoordinates[dim];
     for(int i=0; i<N; i++) {
@@ -806,6 +806,6 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "Rastrigin Function\n"<<std::endl;
     runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    
+    */
     return 0;
 }

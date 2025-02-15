@@ -12,7 +12,7 @@ TOTAL_COMPUTE=$1
 
 module load cuda/12.1
 # Compile the CUDA program
-crun.cuda nvcc -o exe main.cu
+#crun.cuda nvcc -o exe main.cu
 
 # 3) Create a directory named after the total compute if it doesn't exist
 mkdir -p "$TOTAL_COMPUTE"
