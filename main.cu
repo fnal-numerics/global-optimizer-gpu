@@ -53,6 +53,10 @@ public:
     }
 };
 
+__host__ __device__ inline dual::DualNumber dual_abs(const dual::DualNumber &a) {
+    return (a.real < 0.0) ? dual::DualNumber(-a.real, -a.dual) : a;
+}
+
 __host__ __device__ DualNumber sin(const DualNumber& x) {
     return DualNumber(sinf(x.real), x.dual * cosf(x.real));
 }
@@ -144,7 +148,7 @@ __device__ double pow2(double x) {
     return x * x;
 }
 
-
+/*
 __device__ double rosenbrock_device(double* x, int n) {
     double sum = 0.0;
     for (int i = 0; i < n - 1; ++i) {
@@ -169,7 +173,7 @@ __device__ double rastrigin_device(double* x, int n) {
     }
     return sum;
 }
-
+*/
 
 __device__ void initialize_identity_matrix_device(double* H, int n) {
     for (int i = 0; i < n; ++i) {
@@ -318,6 +322,144 @@ struct Rastrigin {
         return rastrigin<DIM>(x);
     }
 };
+
+// Ackley Function (general d-dimensions)
+template<int DIM>
+__device__ dual::DualNumber ackley(const dual::DualNumber* x) {
+    dual::DualNumber sum_sq = 0.0;
+    dual::DualNumber sum_cos = 0.0;
+    for (int i = 0; i < DIM; ++i) {
+        sum_sq += dual::pow(x[i], 2);
+        sum_cos += dual::cos(2.0 * M_PI * x[i]);
+    }
+    dual::DualNumber term1 = dual::DualNumber(-20.0) * dual::exp(-0.2 * dual::sqrt(sum_sq / DIM));
+    dual::DualNumber term2 = dual::DualNumber(0.0) - dual::exp(sum_cos / DIM);
+    return term1 + term2 + 20.0 + dual::exp(1.0);
+}
+
+template<int DIM>
+__device__ double ackley(const double* x) {
+    double sum_sq = 0.0;
+    double sum_cos = 0.0;
+    for (int i = 0; i < DIM; ++i) {
+        sum_sq += x[i] * x[i];
+        sum_cos += cos(2.0 * M_PI * x[i]);
+    }
+    double term1 = -20.0 * exp(-0.2 * sqrt(sum_sq / DIM));
+    double term2 = -exp(sum_cos / DIM);
+    return term1 + term2 + 20.0 + exp(1.0);
+}
+
+template<int DIM>
+struct Ackley {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return ackley<DIM>(x);
+    }
+    __device__ static double evaluate(const double* x) {
+        return ackley<DIM>(x);
+    }
+};
+
+// Goldstein-Price Function (2D only)
+template<int DIM>
+__device__ dual::DualNumber goldstein_price(const dual::DualNumber* x) {
+    static_assert(DIM == 2, "Goldstein-Price is defined for 2 dimensions only.");
+    dual::DualNumber x1 = x[0];
+    dual::DualNumber x2 = x[1];
+    dual::DualNumber term1 = dual::DualNumber(1.0) + dual::pow(x1 + x2 + 1.0, 2) *
+        (19.0 - 14.0 * x1 + 3.0 * dual::pow(x1, 2) - 14.0 * x2 + 6.0 * x1 * x2 + 3.0 * dual::pow(x2, 2));
+    dual::DualNumber term2 = dual::DualNumber(30.0) + dual::pow(2.0 * x1 - 3.0 * x2, 2) *
+        (18.0 - 32.0 * x1 + 12.0 * dual::pow(x1, 2) + 48.0 * x2 - 36.0 * x1 * x2 + 27.0 * dual::pow(x2, 2));
+    return term1 * term2;
+}
+
+template<int DIM>
+__device__ double goldstein_price(const double* x) {
+    static_assert(DIM == 2, "Goldstein-Price is defined for 2 dimensions only.");
+    double x1 = x[0];
+    double x2 = x[1];
+    double term1 = 1.0 + pow(x1 + x2 + 1.0, 2) *
+        (19.0 - 14.0 * x1 + 3.0 * pow(x1, 2) - 14.0 * x2 + 6.0 * x1 * x2 + 3.0 * pow(x2, 2));
+    double term2 = 30.0 + pow(2.0 * x1 - 3.0 * x2, 2) *
+        (18.0 - 32.0 * x1 + 12.0 * pow(x1, 2) + 48.0 * x2 - 36.0 * x1 * x2 + 27.0 * pow(x2, 2));
+    return term1 * term2;
+}
+
+template<int DIM>
+struct GoldsteinPrice {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return goldstein_price<DIM>(x);
+    }
+    __device__ static double evaluate(const double* x) {
+        return goldstein_price<DIM>(x);
+    }
+};
+
+// Eggholder Function (2D only)
+template<int DIM>
+__device__ dual::DualNumber eggholder(const dual::DualNumber* x) {
+    static_assert(DIM == 2, "Eggholder is defined for 2 dimensions only.");
+    dual::DualNumber x1 = x[0], x2 = x[1];
+    // Use (0 - value) in place of unary minus
+    dual::DualNumber term1 = (dual::DualNumber(0.0) - (x2 + dual::DualNumber(47.0))) *
+        dual::sin(dual::sqrt(dual_abs(x1 / dual::DualNumber(2.0) + x2 + dual::DualNumber(47.0))));
+    dual::DualNumber term2 = (dual::DualNumber(0.0) - x1) *
+        dual::sin(dual::sqrt(dual_abs(x1 - (x2 + dual::DualNumber(47.0)))));
+    return term1 + term2;
+}
+
+template<int DIM>
+__device__ double eggholder(const double* x) {
+    static_assert(DIM == 2, "Eggholder is defined for 2 dimensions only.");
+    double x1 = x[0];
+    double x2 = x[1];
+    double term1 = -(x2 + 47.0) *
+        sin(sqrt(fabs(x1 / 2.0 + x2 + 47.0)));
+    double term2 = -x1 *
+        sin(sqrt(fabs(x1 - (x2 + 47.0))));
+    return term1 + term2;
+}
+
+template<int DIM>
+struct Eggholder {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return eggholder<DIM>(x);
+    }
+    __device__ static double evaluate(const double* x) {
+        return eggholder<DIM>(x);
+    }
+};
+
+
+// Himmelblau's Function (2D only)
+template<int DIM>
+__device__ dual::DualNumber himmelblau(const dual::DualNumber* x) {
+    static_assert(DIM == 2, "Himmelblau's function is defined for 2 dimensions only.");
+    dual::DualNumber x1 = x[0], x2 = x[1];
+    dual::DualNumber term1 = dual::pow(x1 * x1 + x2 - dual::DualNumber(11.0), 2);
+    dual::DualNumber term2 = dual::pow(x1 + x2 * x2 - dual::DualNumber(7.0), 2);
+    return term1 + term2;
+}
+
+template<int DIM>
+__device__ double himmelblau(const double* x) {
+    static_assert(DIM == 2, "Himmelblau's function is defined for 2 dimensions only.");
+    double x1 = x[0], x2 = x[1];
+    double term1 = pow(x1 * x1 + x2 - 11.0, 2);
+    double term2 = pow(x1 + x2 * x2 - 7.0, 2);
+    return term1 + term2;
+}
+
+template<int DIM>
+struct Himmelblau {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+        return himmelblau<DIM>(x);
+    }
+    __device__ static double evaluate(const double* x) {
+        return himmelblau<DIM>(x);
+    }
+};
+
 
 template<typename Function, int DIM>
 __device__ void calculateGradientUsingAD(double *x, double *gradient) {
@@ -795,17 +937,26 @@ int main(int argc, char* argv[]) {
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
-    std::cout << "Rosenbrock Function\n" << std::endl;
+    std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
     runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, indices, coordinates, N, MAX_ITER); 
     
-    /*
+    
     int hostIndices[N];
     double hostCoordinates[dim];
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
-    std::cout << "Rastrigin Function\n"<<std::endl;
+    std::cout << "\n\n\tRastrigin Function\n"<<std::endl;
     runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    */
+    std::cout << "\n\n\tAckely Function\n"<<std::endl;
+    runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+
+    std::cout << "\n\n\tGoldStein Price Function\n"<<std::endl;
+    runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    std::cout << "\n\n\tEggholder Function\n"<<std::endl;
+    runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+
+    std::cout << "\n\n\tHimmelblau Function\n"<<std::endl;
+    runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
     return 0;
 }
