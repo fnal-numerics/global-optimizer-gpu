@@ -324,6 +324,9 @@ struct Rastrigin {
 };
 
 // Ackley Function (general d-dimensions)
+//   f(x) = -20 exp\Bigl(-0.2\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2}\Bigr)
+//          - exp\Bigl(\frac{1}{d}\sum_{i=1}^{d}\cos(2\pi x_i)\Bigr)
+//          + 20 + e
 template<int DIM>
 __device__ dual::DualNumber ackley(const dual::DualNumber* x) {
     dual::DualNumber sum_sq = 0.0;
@@ -360,7 +363,9 @@ struct Ackley {
     }
 };
 
-// Goldstein-Price Function (2D only)
+// Goldstein-Price Function
+//   f(x,y) = [1+(x+y+1)^2 (19-14x+3x^2-14y+6xy+3y^2)]
+//            [30+(2x-3y)^2 (18-32x+12x^2+48y-36xy+27y^2)]
 template<int DIM>
 __device__ dual::DualNumber goldstein_price(const dual::DualNumber* x) {
     static_assert(DIM == 2, "Goldstein-Price is defined for 2 dimensions only.");
@@ -395,7 +400,10 @@ struct GoldsteinPrice {
     }
 };
 
-// Eggholder Function (2D only)
+// Eggholder Function
+//   f(x,y) = -(y+47) sin\Bigl(\sqrt{\Bigl|x/2+y+47\Bigr|}\Bigr)
+//            - x sin\Bigl(\sqrt{\Bigl|x-(y+47)\Bigr|}\Bigr)
+
 template<int DIM>
 __device__ dual::DualNumber eggholder(const dual::DualNumber* x) {
     static_assert(DIM == 2, "Eggholder is defined for 2 dimensions only.");
@@ -575,7 +583,7 @@ __global__ void optimizeKernel(double lower, double upper, double* deviceResults
 	for (int i = 0; i < DIM; ++i) { grad_norm += g[i] * g[i];}
         grad_norm = sqrt(grad_norm);
         if (grad_norm < tolerance) {
-            printf("converged");
+            //printf("converged");
 	    break; //converged
 	}
        	//else {
@@ -758,7 +766,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     // Write data to file
     // Format:
     // Optimization_Index Step X_0 X_1 ... X_(DIM-1)
-    std::string filename = std::to_string(MAX_ITER*N)+"/trajectories/"+std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
+    std::string filename = "eggholder_optimization_steps.txt";//std::to_string(MAX_ITER*N)+"/trajectories/"+std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
     std::ofstream stepOut(filename);
     stepOut << "OptIndex Step";
     for (int d = 0; d < DIM; d++) {
@@ -932,7 +940,7 @@ int main(int argc, char* argv[]) {
         hostResults[i] = f0;
     }
      
-    int indices[N];
+    /*int indices[N];
     double coordinates[dim];
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
@@ -940,23 +948,28 @@ int main(int argc, char* argv[]) {
     std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
     runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, indices, coordinates, N, MAX_ITER); 
     
-    
+    */
     int hostIndices[N];
     double hostCoordinates[dim];
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
+    /*
     std::cout << "\n\n\tRastrigin Function\n"<<std::endl;
     runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    
     std::cout << "\n\n\tAckely Function\n"<<std::endl;
     runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-
+    
     std::cout << "\n\n\tGoldStein Price Function\n"<<std::endl;
     runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    */
     std::cout << "\n\n\tEggholder Function\n"<<std::endl;
     runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    /*
 
     std::cout << "\n\n\tHimmelblau Function\n"<<std::endl;
     runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    */
     return 0;
 }
