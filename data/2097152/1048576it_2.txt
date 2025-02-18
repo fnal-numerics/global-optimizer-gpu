@@ -1,0 +1,20 @@
+number of optimizations = 2 max_iter = 1048576 dim = 2
+Rosenbrock Function
+
+first 20 hostResults
+ 333777.000000  333777.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  -0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000 
+Recommended block size: 1024
+
+
+f0 = 69509.654250
+Optimization Kernel execution time = 2299.605957 ms
+
+Global Minima: 0.639180
+Global Minima Index: 1
+Coordinates associated with Global Minima:
+x[0] = 0.219408
+x[1] = 0.030861
+
+Success!! No Error!
+first 20 function values in hostResults
+ 7.115717  0.639180  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.219408  0.030861  0.000000  0.000000  0.000000  -0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000 
