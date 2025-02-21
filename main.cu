@@ -910,55 +910,74 @@ Parameters parseArguments(int argc, char* argv[]) {
 }
 
 template<int dim>
-void selectAndRunOptimization(double lower, double upper, double* hostResults, int* hostIndices,
+void selectAndRunOptimization(double lower, double upper,
+                              double* hostResults, int* hostIndices,
                               double* hostCoordinates, int N, int MAX_ITER) {
     int choice;
-    std::cout << "Select function to optimize:\n"
-              << "1. Rosenbrock\n"
-              << "2. Rastrigin\n"
-              << "3. Ackley\n"
-              << "4. GoldsteinPrice\n"
-              << "5. Eggholder\n"
-              << "6. Himmelblau\n";
+    std::cout << "\nSelect function to optimize:\n"
+              << " 1. Rosenbrock\n"
+              << " 2. Rastrigin\n"
+              << " 3. Ackley\n";
+    // Only show 2D-only options when dim == 2.
+    if constexpr (dim == 2) {
+        std::cout << " 4. GoldsteinPrice\n"
+                  << " 5. Eggholder\n"
+                  << " 6. Himmelblau\n";
+    }
+    std::cout << " 7. Custom (user-defined objective via expression or kernel file)\n"
+              << "Choice: ";
     std::cin >> choice;
+    std::cin.ignore();
 
     switch(choice) {
         case 1:
             std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                              hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
             break;
         case 2:
             std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                             hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
             break;
         case 3:
             std::cout << "\n\n\tAckley Function\n" << std::endl;
-            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                          hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
             break;
         case 4:
-            std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-            runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                                  hostCoordinates, N, MAX_ITER);
+            if constexpr (dim != 2) {
+                std::cerr << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
+            } else {
+                std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
+                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+            }
             break;
         case 5:
-            std::cout << "\n\n\tEggholder Function\n" << std::endl;
-            runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                             hostCoordinates, N, MAX_ITER);
+            if constexpr (dim != 2) {
+                std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
+            } else {
+                std::cout << "\n\n\tEggholder Function\n" << std::endl;
+                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
+            }
             break;
         case 6:
-            std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-            runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,
-                                                              hostCoordinates, N, MAX_ITER);
+            if constexpr (dim != 2) {
+                std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
+            } else {
+                std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
+                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+            }
+            break;
+        case 7:
+            std::cout << "\n\n\tCustom User-Defined Function\n" << std::endl;
+            // For a more complex custom function, one option is to let the user provide a path
+            // to a .cu file and compile it at runtime. 
+            //runOptimizationKernel<UserDefined<dim>, dim>(lower, upper, hostResults, hostIndices,
+            //                                             hostCoordinates, N, MAX_ITER);
             break;
         default:
             std::cerr << "Invalid selection!\n";
             break;
     }
 }
-
 
 int main(int argc, char* argv[]) {
     if (argc != 5) {
@@ -980,7 +999,7 @@ int main(int argc, char* argv[]) {
               << "dim: " << params.dim << "\n";
     */
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 2;
+    const int dim = 10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
