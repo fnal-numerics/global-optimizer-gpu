@@ -909,6 +909,57 @@ Parameters parseArguments(int argc, char* argv[]) {
     return params;
 }
 
+template<int dim>
+void selectAndRunOptimization(double lower, double upper, double* hostResults, int* hostIndices,
+                              double* hostCoordinates, int N, int MAX_ITER) {
+    int choice;
+    std::cout << "Select function to optimize:\n"
+              << "1. Rosenbrock\n"
+              << "2. Rastrigin\n"
+              << "3. Ackley\n"
+              << "4. GoldsteinPrice\n"
+              << "5. Eggholder\n"
+              << "6. Himmelblau\n";
+    std::cin >> choice;
+
+    switch(choice) {
+        case 1:
+            std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                              hostCoordinates, N, MAX_ITER);
+            break;
+        case 2:
+            std::cout << "\n\n\tRastrigin Function\n" << std::endl;
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                             hostCoordinates, N, MAX_ITER);
+            break;
+        case 3:
+            std::cout << "\n\n\tAckley Function\n" << std::endl;
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                          hostCoordinates, N, MAX_ITER);
+            break;
+        case 4:
+            std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
+            runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                                  hostCoordinates, N, MAX_ITER);
+            break;
+        case 5:
+            std::cout << "\n\n\tEggholder Function\n" << std::endl;
+            runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                             hostCoordinates, N, MAX_ITER);
+            break;
+        case 6:
+            std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
+            runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,
+                                                              hostCoordinates, N, MAX_ITER);
+            break;
+        default:
+            std::cerr << "Invalid selection!\n";
+            break;
+    }
+}
+
+
 int main(int argc, char* argv[]) {
     if (argc != 5) {
 	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <number_of_optimizations\n";
@@ -919,7 +970,6 @@ int main(int argc, char* argv[]) {
 
     int MAX_ITER = std::stoi(argv[3]);
     int N = std::stoi(argv[4]);
-
     
     /* Use parsed parameters.
     std::cout << "Parsed Values:\n"
@@ -940,36 +990,11 @@ int main(int argc, char* argv[]) {
         hostResults[i] = f0;
     }
      
-    /*int indices[N];
-    double coordinates[dim];
-    for(int i=0; i<N; i++) {
-        hostResults[i] = f0;
-    }
-    std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-    runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, indices, coordinates, N, MAX_ITER); 
-    
-    */
     int hostIndices[N];
     double hostCoordinates[dim];
     for(int i=0; i<N; i++) {
         hostResults[i] = f0;
     }
-    /*
-    std::cout << "\n\n\tRastrigin Function\n"<<std::endl;
-    runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    
-    std::cout << "\n\n\tAckely Function\n"<<std::endl;
-    runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    
-    std::cout << "\n\n\tGoldStein Price Function\n"<<std::endl;
-    runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    */
-    std::cout << "\n\n\tEggholder Function\n"<<std::endl;
-    runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    /*
-
-    std::cout << "\n\n\tHimmelblau Function\n"<<std::endl;
-    runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
-    */
+    selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
     return 0;
 }
