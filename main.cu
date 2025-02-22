@@ -1004,16 +1004,30 @@ int main(int argc, char* argv[]) {
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
     std::cout << std::setprecision(17) << std::scientific;// << std::setprecision(9);
-    double f0 = 333777; //sum big  
-    for(int i=0; i<N; i++) {
-        hostResults[i] = f0;
-    }
+    //double f0 = 333777; //sum big  
+    //:for(int i=0; i<N; i++) {
+    //    hostResults[i] = f0;
+    //}
      
     int hostIndices[N];
     double hostCoordinates[dim];
-    for(int i=0; i<N; i++) {
-        hostResults[i] = f0;
+    double f0 = 333777; // initial function value
+
+    char cont = 'y';
+    while (cont == 'y' || cont == 'Y') {
+        for (int i = 0; i < N; i++) {
+            hostResults[i] = f0;
+        }
+        selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
+        std::cout << "\nDo you want to optimize another function? (y/n): ";
+        std::cin >> cont;
+        std::cin.ignore();
     }
-    selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
+    
+
+    //for(int i=0; i<N; i++) {
+    //    hostResults[i] = f0;
+    //}
+    //selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
     return 0;
 }
