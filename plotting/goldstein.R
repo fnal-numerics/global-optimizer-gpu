@@ -41,7 +41,7 @@ segments_data <- filtered_data %>%
   ungroup()
 
 # Goldstein-Price grid parameters and function
-x_min <- -15; x_max <- 15; y_min <- -10; y_max <- 10; num_points <- 500
+x_min <- -8; x_max <- 8; y_min <- -8; y_max <- 8; num_points <- 500
 x_seq <- seq(x_min, x_max, length.out = num_points)
 y_seq <- seq(y_min, y_max, length.out = num_points)
 grid <- expand.grid(x = x_seq, y = y_seq)
