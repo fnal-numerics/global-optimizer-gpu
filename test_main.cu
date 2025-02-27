@@ -2,9 +2,21 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
-// Declaration of kernel wrappers defined in main.cu
-extern __global__ void vector_add_kernel(const double* a, const double* b, double* result, int size);
-extern __global__ void vector_scale_kernel(const double* a, double scalar, double* result, int dim);
+// Forward declarations for device functions from main.cu
+extern "C" {
+    __device__ void vector_add(const double* a, const double* b, double* result, int size);
+    __device__ void vector_scale(const double* a, double scalar, double* result, int dim);
+}
+
+// Define __global__ kernels in the test file that call the device functions.
+__global__ void testVectorAddKernel(const double* a, const double* b, double* result, int size) {
+    // Call device function (all threads do the same work here)
+    vector_add(a, b, result, size);
+}
+
+__global__ void testVectorScaleKernel(const double* a, double scalar, double* result, int dim) {
+    vector_scale(a, scalar, result, dim);
+}
 
 // Test function for vector_add
 void test_vector_add() {
@@ -21,8 +33,8 @@ void test_vector_add() {
     cudaMemcpy(dev_a, host_a, size * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(dev_b, host_b, size * sizeof(double), cudaMemcpyHostToDevice);
 
-    // Launch the kernel on 1 thread/block (sufficient for our test)
-    vector_add_kernel<<<1, 1>>>(dev_a, dev_b, dev_result, size);
+    // Launch the test kernel (one block, one thread)
+    testVectorAddKernel<<<1,1>>>(dev_a, dev_b, dev_result, size);
     cudaMemcpy(host_result, dev_result, size * sizeof(double), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < size; ++i) {
@@ -48,12 +60,11 @@ void test_vector_scale() {
     cudaMalloc(&dev_result, dim * sizeof(double));
 
     cudaMemcpy(dev_a, host_a, dim * sizeof(double), cudaMemcpyHostToDevice);
-    vector_scale_kernel<<<1, 1>>>(dev_a, scalar, dev_result, dim);
+    testVectorScaleKernel<<<1,1>>>(dev_a, scalar, dev_result, dim);
     cudaMemcpy(host_result, dev_result, dim * sizeof(double), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < dim; ++i) {
-        double expected = host_a[i] * scalar;
-        assert(host_result[i] == expected);
+        assert(host_result[i] == host_a[i] * scalar);
     }
     
     cudaFree(dev_a);

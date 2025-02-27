@@ -112,18 +112,20 @@ __device__ void outer_product_device(const double* v1, const double* v2, double*
     }
 }
 
-
-__device__ void vector_add(const double* a, const double* b, double* result, int size) {
+// wrap kernel definitions extern "C" block so that their symbols are exported with C linkage
+extern "C" {
+__device__ __noinline__ void vector_add(const double* a, const double* b, double* result, int size) {
     for (int i = 0; i < size; ++i) {
         result[i] = a[i] + b[i];
     }
 }
 
-__device__ void vector_scale(const double* a, double scalar, double* result, int dim) {
+__device__ __noinline__ void vector_scale(const double* a, double scalar, double* result, int dim) {
     for (int i = 0; i < dim; ++i) {
         result[i] = a[i] * scalar;
     }
 }
+}// end extern C
 
 __device__ void initialize_identity_matrix(double* H, int dim) {
     for (int i = 0; i < dim; ++i) {
@@ -979,7 +981,9 @@ void selectAndRunOptimization(double lower, double upper,
     }
 }
 
+#ifndef UNIT_TEST
 int main(int argc, char* argv[]) {
+    printf("Production main() running\n");
     if (argc != 5) {
 	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <number_of_optimizations\n";
         return 1;
@@ -1031,3 +1035,4 @@ int main(int argc, char* argv[]) {
     //selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
     return 0;
 }
+#endif
