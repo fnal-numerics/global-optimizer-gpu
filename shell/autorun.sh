@@ -11,22 +11,47 @@
 TOTAL_COMPUTE=$1
 
 module load cuda/12.1
-# Compile the CUDA program
-#crun.cuda nvcc -o exe main.cu
+echo "Compiling CUDA code"
+crun.cuda nvcc -o exe main.cu
 
-# 3) Create a directory named after the total compute if it doesn't exist
-mkdir -p "$TOTAL_COMPUTE"
+echo "Select function to optimize:"
+echo " 1) Rosenbrock"
+echo " 2) Rastrigin"
+echo " 3) Ackley"
+echo " 4) GoldsteinPrice"
+echo " 5) Eggholder"
+echo " 6) Himmelblau"
+echo " 7) Custom"
+read -p "Enter your choice: " FUNC_CHOICE
+
+# map choice to lowercase name
+case $FUNC_CHOICE in
+    1) FUNC_NAME="rosenbrock";;
+    2) FUNC_NAME="rastrigin";;
+    3) FUNC_NAME="ackley";;
+    4) FUNC_NAME="goldsteinprice";;
+    5) FUNC_NAME="eggholder";;
+    6) FUNC_NAME="himmelblau";;
+    7) FUNC_NAME="custom";;
+    *) echo "Invalid choice"; exit 1;;
+esac
+
+OUTPUT_DIR="data/${FUNC_NAME}/${TOTAL_COMPUTE}"
+mkdir -p "$OUTPUT_DIR"
 
 # 4) Generate powers of two for max_iter from 1 up to TOTAL_COMPUTE
 #    For each max_iter = 1, 2, 4, 8, ..., calculate num_opt = TOTAL_COMPUTE / max_iter
 #    Then run the program with those arguments, saving output.
-ITER=1
-while [ $ITER -le $TOTAL_COMPUTE ]; do
-    NUM_OPT=$((TOTAL_COMPUTE / ITER))
+NUM_OPT=1
+while [ $NUM_OPT -le $TOTAL_COMPUTE ]; do
+    ITER=$((TOTAL_COMPUTE / NUM_OPT))
     echo "Running with max_iter=$ITER and num_opt=$NUM_OPT"
-    ./exe -5.0 5.0 "$ITER" "$NUM_OPT" \
-      &> ./"$TOTAL_COMPUTE"/"${ITER}it_${NUM_OPT}.txt"
-    ITER=$((ITER * 2))
+    {
+        echo "$FUNC_CHOICE"  # Send the user's function choice
+        echo n             # Exit the interactive loop in the program
+    } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" &> ./"$TOTAL_COMPUTE"/"${ITER}it_${NUM_OPT}.txt"
+    
+    NUM_OPT=$((NUM_OPT * 2))
 done
 
 echo "\begin{table}[ht]"
