@@ -36,12 +36,17 @@ case $FUNC_CHOICE in
     *) echo "Invalid choice"; exit 1;;
 esac
 
-OUTPUT_DIR="data/${FUNC_NAME}/${TOTAL_COMPUTE}"
+OUTPUT_DIR="../data/${FUNC_NAME}/${TOTAL_COMPUTE}"
 mkdir -p "$OUTPUT_DIR"
 
-# 4) Generate powers of two for max_iter from 1 up to TOTAL_COMPUTE
-#    For each max_iter = 1, 2, 4, 8, ..., calculate num_opt = TOTAL_COMPUTE / max_iter
-#    Then run the program with those arguments, saving output.
+# Initialize TSV file with header
+TSV_FILE="${OUTPUT_DIR}/results.tsv"
+echo -e "Iter\tNumOpt\tTime (ms)\tError\tx[0]\tx[1]\tThreadIndex" > "$TSV_FILE"
+
+# generate powers of two for max_iter from 1 up to TOTAL_COMPUTE
+#   for each max_iter = 1, 2, 4, 8, ..., calculate num_opt = TOTAL_COMPUTE / max_iter
+#     then run the program with those arguments
+#     saving output
 NUM_OPT=1
 while [ $NUM_OPT -le $TOTAL_COMPUTE ]; do
     ITER=$((TOTAL_COMPUTE / NUM_OPT))
@@ -49,7 +54,7 @@ while [ $NUM_OPT -le $TOTAL_COMPUTE ]; do
     {
         echo "$FUNC_CHOICE"  # Send the user's function choice
         echo n             # Exit the interactive loop in the program
-    } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" &> ./"$TOTAL_COMPUTE"/"${ITER}it_${NUM_OPT}.txt"
+    } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" &> ./"$OUTPUT_DIR"/"${ITER}it_${NUM_OPT}.txt"
     
     NUM_OPT=$((NUM_OPT * 2))
 done
@@ -61,10 +66,10 @@ echo "\hline"
 echo "Iter & NumOpt & Time (ms) & Error & x[0] & x[1] & ThreadIndex \\\\"
 echo "\hline"
 
-# 1) Gather all .txt files in an array
-files=( "$TOTAL_COMPUTE"/*.txt )
+# gather all .txt files in an array
+files=( "$OUTPUT_DIR"/*.txt )
 
-# 2) For each file, parse out the iteration value and store in a map/dict
+# for each file, parse out the iteration value and store in a map/dict
 declare -A fileIter
 for f in "${files[@]}"; do
   BASENAME=$(basename "$f")
@@ -72,12 +77,12 @@ for f in "${files[@]}"; do
   fileIter["$f"]=$ITER
 done
 
-# 3) Sort files by iteration in descending order
+# sort files by iteration in descending order
 sortedFiles=($(for f in "${files[@]}"; do
   echo "${fileIter[$f]} $f"
 done | sort -k1,1nr | awk '{print $2}'))
 
-# 4) Process files in descending iteration order
+# process files in descending iteration order
 for f in "${sortedFiles[@]}"; do
   BASENAME=$(basename "$f")
   ITER=$(echo "$BASENAME" | sed -E 's/^([0-9]+)it_.*/\1/')
@@ -99,11 +104,12 @@ for f in "${sortedFiles[@]}"; do
     | sed -E 's/^x\[1\]\s*=\s*([0-9.\-]+)/\1/')
 
   echo "$ITER & $NUMOPT & $TIME & $ERROR & $X0 & $X1 & $THREADIDX \\\\"
+  
 done
 
 echo "\hline"
 echo "\end{tabular}"
-echo "\caption{Results for total compute of $TOTAL_COMPUTE.}"
-echo "\label{tab:${TOTAL_COMPUTE}results}"
+echo "\caption{Results for ${FUNC_NAME} total compute of $TOTAL_COMPUTE.}"
+echo "\label{tab:${FUNC_NAME}-${TOTAL_COMPUTE}-results}"
 echo "\end{table}"
 
