@@ -199,6 +199,7 @@ __device__ void matrix_multiply_device(const double* A, const double* B, double*
 }
 
 // BFGS update with compile-time dimension
+/*
 template<int DIM>
 __device__ void bfgs_update(double* H, const double* s, const double* y, double sTy){
     if(::fabs(sTy)<1e-14) return;
@@ -235,7 +236,41 @@ __device__ void bfgs_update(double* H, const double* s, const double* y, double 
         }
     }
 }
+*/
 
+template<int DIM>
+__device__ void bfgs_update(double* H, const double* s, const double* y, double sTy) {
+    if (::fabs(sTy) < 1e-14) return;
+    double rho = 1.0 / sTy;
+    
+    // Compute H_new element-wise without allocating large temporary matrices.
+    // H_new = (I - rho * s * y^T) * H * (I - rho * y * s^T) + rho * s * s^T
+    double H_new[DIM * DIM];  // Temporary array (DIM^2 elements)
+    
+    for (int i = 0; i < DIM; i++) {
+        for (int j = 0; j < DIM; j++) {
+            double sum = 0.0;
+            for (int k = 0; k < DIM; k++) {
+                // Compute element (i,k) of (I - rho * s * y^T)
+                double A_ik = ((i == k) ? 1.0 : 0.0) - rho * s[i] * y[k];
+                double inner = 0.0;
+                for (int m = 0; m < DIM; m++) {
+                    // Compute element (m,j) of (I - rho * y * s^T)
+                    double B_mj = ((m == j) ? 1.0 : 0.0) - rho * y[m] * s[j];
+                    inner += H[k * DIM + m] * B_mj;
+                }
+                sum += A_ik * inner;
+            }
+            // Add the rho * s * s^T term
+            H_new[i * DIM + j] = sum + rho * s[i] * s[j];
+        }
+    }
+    
+    // Copy H_new back into H
+    for (int i = 0; i < DIM * DIM; i++) {
+        H[i] = H_new[i];
+    }
+}
 
 
 // function to calculate scalar directional direvative d = g * p
@@ -520,38 +555,18 @@ __device__ double line_search(double f0, const double* x, const double* p, const
 //const int MAX_ITER = 64;
 
 template<typename Function, int DIM, unsigned int blockSize>
-__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER) {
+//__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
-//__global__ void optimizeKernel(double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N) {
+__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
 
     //int early_stopping = 0;
     double H[DIM * DIM];
     double g[DIM], x[DIM], x_new[DIM], p[DIM], g_new[DIM], delta_x[DIM], delta_g[DIM];//, new_direction[DIM];
-    /*for (int i = 0; i < DIM; i++) H[i] = 0;
-    for (int i = 0; i < DIM; i++) {
-        g[i] = 0;
-        x[i] = 0;
-        x_new[i] = 0;
-        p[i] = 0;
-        g_new[i] = 0;
-        delta_x[i] = 0;
-        delta_g[i] = 0;
-    }*/
-    //double s[DIM];
-    //double minima = 10000000;
-    //double min_alpha = 0.3;
-    //double max_alpha = 1.0;
-    //double delta_dot = 0;
     double tolerance = 1e-8;
     // Line Search params
-    //double min_f = -1000.0;
-    //int max_iter = 5;
-    //double lambda = 15.0;
-    //double alpha = min_alpha;
-    //double d0 = 0;
 
     util::initialize_identity_matrix(H, DIM);
     //unsigned int seed = 135;
@@ -641,10 +656,10 @@ __global__ void optimizeKernel(double lower, double upper, double* deviceResults
 	   } 
 	}
 	
-        // deviceTrajectory layout: idx * (MAX_ITER * DIM) + iter * DIM + i
+        /* deviceTrajectory layout: idx * (MAX_ITER * DIM) + iter * DIM + i
 	for (int i = 0; i < DIM; i++) {
             deviceTrajectory[idx * (MAX_ITER * DIM) + iter * DIM + i] = x[i];
-        }
+        }*/
 	//for(int i=0; i<DIM; ++i) {x[i] = x_new[i];}
     }// end outer for
     bestVal = Function::evaluate(x);//rosenbrock_device(x, DIM);
@@ -684,9 +699,10 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     int minGridSize; // The minimum grid size needed to achieve maximum occupancy
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blokSize, optimizeKernel<Function, DIM, 128>, 0, 0);
     printf("Recommended block size: %d\n", blokSize);    
-
+    /*
     double* deviceTrajectory;
     cudaMalloc(&deviceTrajectory, N * MAX_ITER * DIM * sizeof(double));
+    */
 
     dim3 blockSize(128);
     dim3 numBlocks((N + blockSize.x - 1) / blockSize.x);
@@ -709,9 +725,9 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     cudaEventCreate(&stop);
     cudaEventRecord(start);
     
-    optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(
-    lower, upper, deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER);
-    //optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(deviceResults, deviceIndices, deviceCoordinates, N);
+    //optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(
+    //lower, upper, deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER);
+    optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(lower, upper,deviceResults, deviceIndices, deviceCoordinates, N, MAX_ITER);
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -746,24 +762,10 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     for (int i = 0; i < DIM; ++i) {
         printf("x[%d] = %f\n", i, hostCoordinates[i]);
     }
-    /* Allocate host memory for new arrays
-    double* hostStartingPositions = new double[N * DIM];
-    double* hostStoppingPositions = new double[N * DIM];
-    double* hostFnValueStart = new double[N];
-    double* hostFnValueStop = new double[N];
-    int* hostNumSteps = new int[N];
-    */
 
+    /*
     double* hostTrajectory = new double[N * MAX_ITER * DIM];
     cudaMemcpy(hostTrajectory, deviceTrajectory, N * MAX_ITER * DIM * sizeof(double), cudaMemcpyDeviceToHost);
-
-    /* Copy data from device to host
-    cudaMemcpy(hostStartingPositions, deviceStartingPositions, N * DIM * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostStoppingPositions, deviceStoppingPositions, N * DIM * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostFnValueStart, deviceFnValueStart, N * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostFnValueStop, deviceFnValueStop, N * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostNumSteps, deviceNumSteps, N * sizeof(int), cudaMemcpyDeviceToHost);
-    */
 
     // Write data to file
     // Format:
@@ -788,7 +790,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     
     delete[] hostTrajectory;
     cudaFree(deviceTrajectory);
-    
+    */
     
     //hostResults[0] = globalMin;
     //cudaMemcpy(hostResults + 1, deviceResults + 1, (N - 1) * sizeof(double), cudaMemcpyDeviceToHost);
@@ -1003,7 +1005,7 @@ int main(int argc, char* argv[]) {
               << "dim: " << params.dim << "\n";
     */
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 64;
+    const int dim = 100;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
@@ -1016,12 +1018,13 @@ int main(int argc, char* argv[]) {
     int hostIndices[N];
     double hostCoordinates[dim];
     double f0 = 333777; // initial function value
-    
+
+
     size_t currentStackSize = 0;
     cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
     printf("Current stack size: %zu bytes\n", currentStackSize);
 
-    size_t newStackSize = 128  * 1024; // 1 MB per thread
+    size_t newStackSize = 64  * 1024; // 1 MB per thread
     cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
     if (err != cudaSuccess) {
         printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
@@ -1029,6 +1032,8 @@ int main(int argc, char* argv[]) {
     } else {
             printf("Successfully set stack size to %zu bytes\n", newStackSize);
     }
+
+
     char cont = 'y';
     while (cont == 'y' || cont == 'Y') {
         for (int i = 0; i < N; i++) {
