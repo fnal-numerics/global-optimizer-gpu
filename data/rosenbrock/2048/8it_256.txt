@@ -1,0 +1,36 @@
+Production main() running
+number of optimizations = 256 max_iter = 8 dim = 2
+Current stack size: 1024 bytes
+Successfully set stack size to 65536 bytes
+
+Select function to optimize:
+ 1. Rosenbrock
+ 2. Rastrigin
+ 3. Ackley
+ 4. GoldsteinPrice
+ 5. Eggholder
+ 6. Himmelblau
+ 7. Custom (user-defined objective via expression or kernel file)
+Choice: 
+
+	Rosenbrock Function
+
+first 20 hostResults
+ 333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000  333777.000000 
+Recommended block size: 1024
+
+
+f0 = 69509.654250
+Optimization Kernel execution time = 4.402176 ms
+
+Global Minima: 0.000004
+Global Minima Index: 224
+Coordinates associated with Global Minima:
+x[0] = 0.998503
+x[1] = 0.996886
+
+Success!! No Error!
+first 20 function values in hostResults
+ 11.883272  0.531266  0.000776  1.846203  1.687006  5.277686  5.057810  6.669571  0.029024  0.923043  3.081947  6.473203  13.221132  0.047081  0.015003  0.001514  0.105369  0.123716  0.345759  11.755624 
+
+Do you want to optimize another function? (y/n): 
