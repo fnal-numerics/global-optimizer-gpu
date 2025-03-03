@@ -36,7 +36,7 @@ case $FUNC_CHOICE in
     *) echo "Invalid choice"; exit 1;;
 esac
 
-OUTPUT_DIR="../data/${FUNC_NAME}/${TOTAL_COMPUTE}"
+OUTPUT_DIR="../data/${FUNC_NAME}/100dim/${TOTAL_COMPUTE}"
 mkdir -p "$OUTPUT_DIR"
 
 # Initialize TSV file with header
@@ -48,22 +48,24 @@ echo -e "Iter\tNumOpt\tTime (ms)\tError\tx[0]\tx[1]\tThreadIndex" > "$TSV_FILE"
 #     then run the program with those arguments
 #     saving output
 NUM_OPT=1
+'
 while [ $NUM_OPT -le $TOTAL_COMPUTE ]; do
     ITER=$((TOTAL_COMPUTE / NUM_OPT))
     echo "Running with max_iter=$ITER and num_opt=$NUM_OPT"
     {
-        echo "$FUNC_CHOICE"  # Send the user's function choice
+        echo "$FUNC_CHOICE"
         echo n             # Exit the interactive loop in the program
     } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" &> ./"$OUTPUT_DIR"/"${ITER}it_${NUM_OPT}.txt"
     
     NUM_OPT=$((NUM_OPT * 2))
 done
+'
 
 echo "\begin{table}[ht]"
 echo "\centering"
 echo "\begin{tabular}{ccccccc}"
 echo "\hline"
-echo "Iter & NumOpt & Time (ms) & Error & x[0] & x[1] & ThreadIndex \\\\"
+echo "Iter & NumOpt & Time (ms) & Error & Coordinates & ThreadIndex \\\\"
 echo "\hline"
 
 # gather all .txt files in an array
@@ -102,8 +104,11 @@ for f in "${sortedFiles[@]}"; do
 
   X1=$(grep -m1 "^x\[1\]" "$f" \
     | sed -E 's/^x\[1\]\s*=\s*([0-9.\-]+)/\1/')
-
-  echo "$ITER & $NUMOPT & $TIME & $ERROR & $X0 & $X1 & $THREADIDX \\\\"
+  
+  COORDINATES=$(printf "(%.4f, %.4f)" "$X0" "$X1")
+  printf "%d & %d & %.2f & %.2f & %s & %d \\\\\\\\\n" \
+    "$ITER" "$NUMOPT" "$TIME" "$ERROR" "$COORDINATES" "$THREADIDX"
+  #echo "$ITER & $NUMOPT & $TIME & $ERROR & $COORDINATES & $THREADIDX \\\\"
   
 done
 
