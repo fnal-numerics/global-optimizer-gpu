@@ -11,6 +11,8 @@
 #include <iomanip>
 #include <cstdlib>
 
+#include <filesystem>
+
 namespace dual {
 
 class DualNumber {
@@ -199,45 +201,6 @@ __device__ void matrix_multiply_device(const double* A, const double* B, double*
 }
 
 // BFGS update with compile-time dimension
-/*
-template<int DIM>
-__device__ void bfgs_update(double* H, const double* s, const double* y, double sTy){
-    if(::fabs(sTy)<1e-14) return;
-    double rho = 1.0/sTy;
-    // s y^T
-    double sY[DIM*DIM], yS[DIM*DIM], sS[DIM*DIM];
-    //outer_product_device<DIM>(s,y,sY);
-    //outer_product_device<DIM>(y,s,yS);
-    //outer_product_device<DIM>(s,s,sS);
-    outer_product_device(s, y, sY, DIM);
-    outer_product_device(y, s, yS, DIM);
-    outer_product_device(s, s, sS, DIM);
-    for(int i=0;i<DIM;i++){
-        for(int j=0;j<DIM;j++){
-            double Iij = (i==j)?1.0:0.0;
-            int idx = i*DIM + j;
-            // left multiply with (I - rho s y^T)
-            double factor1 = Iij - rho*sY[idx];
-            // multiply factor1 with row i of H
-            double rowMult=0.0;
-            for(int k=0;k<DIM;k++){
-                rowMult += factor1 * H[i*DIM + k];
-            }
-            // right multiply (I - rho y s^T)
-            double factor2=0.0;
-            for(int m=0;m<DIM;m++){
-                double term = ( (m==j)?1.0:0.0 ) - rho*yS[m*DIM + j];
-                factor2 += rowMult * term;
-            }
-            // + rho * s s^T
-            double addTerm = rho*sS[idx];
-            double val = factor2 + addTerm;
-            H[idx] = val;
-        }
-    }
-}
-*/
-
 template<int DIM>
 __device__ void bfgs_update(double* H, const double* s, const double* y, double sTy) {
     if (::fabs(sTy) < 1e-14) return;
@@ -555,10 +518,10 @@ __device__ double line_search(double f0, const double* x, const double* p, const
 //const int MAX_ITER = 64;
 
 template<typename Function, int DIM, unsigned int blockSize>
-//__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER) {
+__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, bool save_trajectories = false) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
-__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
+//__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
 
@@ -656,10 +619,13 @@ __global__ void optimizeKernel(double lower, double upper, double* deviceResults
 	   } 
 	}
 	
-        /* deviceTrajectory layout: idx * (MAX_ITER * DIM) + iter * DIM + i
-	for (int i = 0; i < DIM; i++) {
-            deviceTrajectory[idx * (MAX_ITER * DIM) + iter * DIM + i] = x[i];
-        }*/
+	//  deviceTrajectory layout: idx * (MAX_ITER * DIM) + iter * DIM + i
+	if (save_trajectories) {
+	   for (int i = 0; i < DIM; i++) {
+               deviceTrajectory[idx * (MAX_ITER * DIM) + iter * DIM + i] = x[i];
+           }
+	} 
+
 	//for(int i=0; i<DIM; ++i) {x[i] = x_new[i];}
     }// end outer for
     bestVal = Function::evaluate(x);//rosenbrock_device(x, DIM);
@@ -670,8 +636,6 @@ __global__ void optimizeKernel(double lower, double upper, double* deviceResults
         deviceCoordinates[idx * DIM + i] = x[i];
     }
 }// end optimizerKernel
-
-
 
 const int doublesPerThread = 1024;
 
@@ -692,17 +656,66 @@ __global__ void generate_random_doubles(curandState *state, double *out, int n) 
     }
 }
 
+bool askUser2saveTrajectories() {
+    std::cout << "Save optimization trajectories? (y/n): ";
+    char ans;
+    std::cin >> ans;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    return (ans == 'y' || ans == 'Y');
+}
+
+void createOutputDirs(const std::string &path) {
+    std::filesystem::create_directories(path);
+}
+
+
+cudaError_t writeTrajectoryData(
+    double* hostTrajectory,
+    int N, int MAX_ITER, int DIM,
+    const std::string &fun_name,
+    const std::string &basePath
+) {
+    // construct the directory path and create it.
+    std::string dirPath = basePath + "/" + fun_name + "/"
+                        + std::to_string(MAX_ITER * N) + "/trajectories";
+    std::filesystem::create_directories(dirPath);
+    //createOutputDirs(dirPath);
+
+    // the final filename.
+    std::string filename = dirPath + "/"
+                         + std::to_string(MAX_ITER) + "it_"
+                         + std::to_string(N) + ".tsv";
+
+    std::ofstream stepOut(filename);
+    stepOut << "OptIndex\tStep";
+    for (int d = 0; d < DIM; d++)
+        stepOut << "\tX_" << d;
+    stepOut << "\n";
+    //std::cout << std::setprecision(17) << std::scientific;
+    stepOut << std::scientific << std::setprecision(17);
+    for (int i = 0; i < N; i++) {
+        for (int it = 0; it < MAX_ITER; it++) {
+            stepOut << i << "\t" << it;
+            for (int d = 0; d < DIM; d++) {
+                stepOut << "\t" << hostTrajectory[i * (MAX_ITER * DIM) + it * DIM + d];
+            }
+	    stepOut << "\n";
+        }
+    }
+    stepOut.close();
+    return cudaSuccess;
+}
 
 template<typename Function, int DIM>
-cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER) {
+cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER, std::string fun_name) {
     int blokSize; // The launch configurator returned block size
     int minGridSize; // The minimum grid size needed to achieve maximum occupancy
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blokSize, optimizeKernel<Function, DIM, 128>, 0, 0);
     printf("Recommended block size: %d\n", blokSize);    
-    /*
-    double* deviceTrajectory;
-    cudaMalloc(&deviceTrajectory, N * MAX_ITER * DIM * sizeof(double));
-    */
+    bool save_trajectories = askUser2saveTrajectories();
+	    
+    double* deviceTrajectory = nullptr;
+    
 
     dim3 blockSize(128);
     dim3 numBlocks((N + blockSize.x - 1) / blockSize.x);
@@ -727,8 +740,12 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
     
     //optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(
     //lower, upper, deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER);
-    optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(lower, upper,deviceResults, deviceIndices, deviceCoordinates, N, MAX_ITER);
-
+    if (save_trajectories) {// only allocate large trajectory array if user wants to!!
+	cudaMalloc(&deviceTrajectory, N * MAX_ITER * DIM * sizeof(double));
+        optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(lower, upper,deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER, save_trajectories);
+    } else {
+        optimizeKernel<Function, DIM, 128><<<numBlocks, blockSize>>>(lower, upper,deviceResults, deviceIndices, deviceCoordinates, deviceTrajectory, N, MAX_ITER);
+    }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float milliKernel = 0;
@@ -763,34 +780,17 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
         printf("x[%d] = %f\n", i, hostCoordinates[i]);
     }
 
-    /*
-    double* hostTrajectory = new double[N * MAX_ITER * DIM];
-    cudaMemcpy(hostTrajectory, deviceTrajectory, N * MAX_ITER * DIM * sizeof(double), cudaMemcpyDeviceToHost);
-
-    // Write data to file
-    // Format:
-    // Optimization_Index Step X_0 X_1 ... X_(DIM-1)
-    std::string filename = "eggholder_optimization_steps.txt";//std::to_string(MAX_ITER*N)+"/trajectories/"+std::to_string(MAX_ITER)+"it_"+ std::to_string(N) + "opt.txt"; 
-    std::ofstream stepOut(filename);
-    stepOut << "OptIndex Step";
-    for (int d = 0; d < DIM; d++) {
-        stepOut << " X_" << d;
-    }
-    stepOut << "\n";
-
-    for (int i = 0; i < N; i++) {
-        for (int it = 0; it < MAX_ITER; it++) {
-            stepOut << i << " " << it << " ";
-            for (int d = 0; d < DIM; d++) {
-                stepOut << hostTrajectory[i * (MAX_ITER * DIM) + it * DIM + d] << (d == DIM-1 ? "\n" : " ");
-            }
-        }
-    }
-    stepOut.close();
     
-    delete[] hostTrajectory;
-    cudaFree(deviceTrajectory);
-    */
+    if (save_trajectories) {
+        double* hostTrajectory = new double[N * MAX_ITER * DIM];
+        cudaMemcpy(hostTrajectory, deviceTrajectory, N * MAX_ITER * DIM * sizeof(double), cudaMemcpyDeviceToHost);
+        writeTrajectoryData(hostTrajectory, N, MAX_ITER, DIM, fun_name, "./data");
+    
+        delete[] hostTrajectory;
+        cudaFree(deviceTrajectory);
+    } //end save trajectories
+    
+
     
     //hostResults[0] = globalMin;
     //cudaMemcpy(hostResults + 1, deviceResults + 1, (N - 1) * sizeof(double), cudaMemcpyDeviceToHost);
@@ -832,7 +832,7 @@ void quickSort(double arr[], int low, int high) {
 }
 
 template<typename Function, int DIM>
-void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER) {
+void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER, std::string fun_name) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
     printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
@@ -840,7 +840,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     }
     printf("\n");
     
-    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER);
+    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, fun_name);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
@@ -936,22 +936,22 @@ void selectAndRunOptimization(double lower, double upper,
     switch(choice) {
         case 1:
             std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER, "rosenbrock");
             break;
         case 2:
             std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER, "rastrigin");
             break;
         case 3:
             std::cout << "\n\n\tAckley Function\n" << std::endl;
-            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER, "ackley");
             break;
         case 4:
             if constexpr (dim != 2) {
                 std::cerr << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER, "goldstein");
             }
             break;
         case 5:
@@ -959,7 +959,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tEggholder Function\n" << std::endl;
-                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER);
+                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER, "eggholder");
             }
             break;
         case 6:
@@ -967,7 +967,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER);
+                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER, "himmelblau");
             }
             break;
         case 7:
@@ -1005,15 +1005,10 @@ int main(int argc, char* argv[]) {
               << "dim: " << params.dim << "\n";
     */
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 100;
+    const int dim = 2;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
-    std::cout << std::setprecision(17) << std::scientific;// << std::setprecision(9);
-    //double f0 = 333777; //sum big  
-    //:for(int i=0; i<N; i++) {
-    //    hostResults[i] = f0;
-    //}
      
     int hostIndices[N];
     double hostCoordinates[dim];
