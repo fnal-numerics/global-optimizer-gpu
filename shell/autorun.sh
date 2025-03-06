@@ -9,10 +9,18 @@
 
 # 1) Pass the total compute as the first argument
 TOTAL_COMPUTE=$1
+DIM=$2
 
 module load cuda/12.1
 echo "Compiling CUDA code"
 crun.cuda nvcc -o exe main.cu
+
+if [ "$DIM" -ge 2 ]; then
+    echo "DIM >= 2"
+else
+    echo "DIM < 2."
+    #exit 1
+fi
 
 echo "Select function to optimize:"
 echo " 1) Rosenbrock"
@@ -36,7 +44,7 @@ case $FUNC_CHOICE in
     *) echo "Invalid choice"; exit 1;;
 esac
 
-OUTPUT_DIR="../data/${FUNC_NAME}/100dim/${TOTAL_COMPUTE}"
+OUTPUT_DIR="../data/${FUNC_NAME}/${DIM}d/${TOTAL_COMPUTE}"
 mkdir -p "$OUTPUT_DIR"
 
 # Initialize TSV file with header
@@ -48,18 +56,18 @@ echo -e "Iter\tNumOpt\tTime (ms)\tError\tx[0]\tx[1]\tThreadIndex" > "$TSV_FILE"
 #     then run the program with those arguments
 #     saving output
 NUM_OPT=1
-'
+
 while [ $NUM_OPT -le $TOTAL_COMPUTE ]; do
     ITER=$((TOTAL_COMPUTE / NUM_OPT))
     echo "Running with max_iter=$ITER and num_opt=$NUM_OPT"
     {
         echo "$FUNC_CHOICE"
-        echo n             # Exit the interactive loop in the program
-    } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" &> ./"$OUTPUT_DIR"/"${ITER}it_${NUM_OPT}.txt"
+	echo y             # save trajectory
+        echo n             # exit the interactive loop in the program
+    } | ./exe -5.0 5.0 "$ITER" "$NUM_OPT" "$DIM" &> ./"$OUTPUT_DIR"/"${ITER}it_${NUM_OPT}.txt"
     
     NUM_OPT=$((NUM_OPT * 2))
 done
-'
 
 echo "\begin{table}[ht]"
 echo "\centering"
