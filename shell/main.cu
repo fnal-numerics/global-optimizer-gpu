@@ -152,32 +152,6 @@ __device__ double pow2(double x) {
     return x * x;
 }
 
-/*
-__device__ double rosenbrock_device(double* x, int n) {
-    double sum = 0.0;
-    for (int i = 0; i < n - 1; ++i) {
-        sum += 100 * pow2(x[i + 1] - pow2(x[i])) + pow2(1-x[i]);
-    }
-
-    return sum;
-}
-
-__device__ void rosenbrock_gradient_device(double* x, double* grad, int n) {
-    grad[0] = -2 * (1 - x[0]) - 400 * x[0] * (x[1] - pow2(x[0]));
-    for (size_t i = 1; i < n - 1; ++i) {
-        grad[i] = -2 * (1 - x[i]) + 200 * (x[i] - pow2(x[i - 1])) - 400 * x[i] * (x[i + 1] - pow2(x[i]));
-    }
-    grad[n - 1] = 200 * (x[n - 1] - pow2(x[n - 2]));
-}
-
-__device__ double rastrigin_device(double* x, int n) {
-    double sum = 10 * n;
-    for (int i = 0; i < n; ++i) {
-        sum += (x[i] * x[i] - 10 * cos(2 * M_PI * x[i]));
-    }
-    return sum;
-}
-*/
 
 __device__ void initialize_identity_matrix_device(double* H, int n) {
     for (int i = 0; i < n; ++i) {
@@ -537,7 +511,7 @@ __global__ void optimizeKernel(double lower, double upper, double* deviceResults
     
     int num_steps = 0;
 
-    unsigned int seed = 379;
+    unsigned int seed = 4;
     //unsigned int seed = 1234;
     for (int i = 0; i < DIM; ++i) {
         x[i] = util::generate_random_double(seed+idx*DIM+i, lower, upper);// devicePoints[i * dim + idx];
@@ -677,7 +651,7 @@ cudaError_t writeTrajectoryData(
 ) {
     // construct the directory path and create it.
     std::string dirPath = basePath + "/" + fun_name + "/"
-                        + std::to_string(MAX_ITER * N) + "/trajectories";
+       + std::to_string(DIM) + "d/" + std::to_string(MAX_ITER * N) + "/trajectories";
     std::filesystem::create_directories(dirPath);
     //createOutputDirs(dirPath);
 
@@ -691,7 +665,6 @@ cudaError_t writeTrajectoryData(
     for (int d = 0; d < DIM; d++)
         stepOut << "\tX_" << d;
     stepOut << "\n";
-    //std::cout << std::setprecision(17) << std::scientific;
     stepOut << std::scientific << std::setprecision(17);
     for (int i = 0; i < N; i++) {
         for (int it = 0; it < MAX_ITER; it++) {
@@ -780,7 +753,42 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
         printf("x[%d] = %f\n", i, hostCoordinates[i]);
     }
 
-    
+
+
+    // Compute Euclidean error based on known optimum
+    double error = 0.0;
+    if (fun_name == "rosenbrock") {
+        for (int i = 0; i < DIM; i++) {
+            double diff = hostCoordinates[i] - 1.0;
+            error += diff * diff;
+        }
+    } else if (fun_name == "rastrigin" || fun_name == "ackley") {
+        for (int i = 0; i < DIM; i++) {
+            error += hostCoordinates[i] * hostCoordinates[i];
+        }
+    } else {
+        error = std::numeric_limits<double>::quiet_NaN();
+    }
+    error = sqrt(error);
+
+    // Append results to a .tsv file in precision 17
+    {
+    std::ofstream outfile("main_10d_results.tsv", std::ios::app);
+    // Convert kernel time from milliseconds to seconds.
+    double time_seconds = milliKernel / 1000.0;
+    outfile << fun_name << "\t" << N << "\t" 
+            << std::fixed << std::setprecision(17) << time_seconds << "\t"
+            << error << "\t"
+            << globalMin << "\t";
+    for (int i = 0; i < DIM; i++) {
+        outfile << hostCoordinates[i];
+        if (i < DIM - 1)
+            outfile << ",";
+    }
+    outfile << "\n";
+    outfile.close();
+    }
+
     if (save_trajectories) {
         double* hostTrajectory = new double[N * MAX_ITER * DIM];
         cudaMemcpy(hostTrajectory, deviceTrajectory, N * MAX_ITER * DIM * sizeof(double), cudaMemcpyDeviceToHost);
@@ -789,8 +797,6 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
         delete[] hostTrajectory;
         cudaFree(deviceTrajectory);
     } //end save trajectories
-    
-
     
     //hostResults[0] = globalMin;
     //cudaMemcpy(hostResults + 1, deviceResults + 1, (N - 1) * sizeof(double), cudaMemcpyDeviceToHost);
@@ -804,6 +810,7 @@ cudaError_t launchOptimizeKernel(double lower, double upper, double* hostResults
 
     return cudaSuccess;
 }
+
 
 void swap(double* a, double* b) {
     double t = *a;
@@ -834,12 +841,12 @@ void quickSort(double arr[], int low, int high) {
 template<typename Function, int DIM>
 void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER, std::string fun_name) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
-    printf("first 20 hostResults\n");
+    /*printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
        printf(" %f ",hostResults[i]);
     }
     printf("\n");
-    
+    */
     cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, fun_name);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
@@ -859,10 +866,10 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     cudaEventDestroy(stop);
     //printf("took %f ms\n",  milli);    
 
-    printf("first 20 function values in hostResults\n");
+    /*printf("first 20 function values in hostResults\n");
     for(int i=0;i<20;i++) {
        printf(" %f ",hostResults[i]);
-    }
+    }*/
     printf("\n");
 //cudaMemGetInfo
 }
@@ -979,7 +986,7 @@ void selectAndRunOptimization(double lower, double upper,
             break;
         default:
             std::cerr << "Invalid selection!\n";
-            break;
+            exit(1);
     }
 }
 
@@ -996,6 +1003,7 @@ int main(int argc, char* argv[]) {
     int MAX_ITER = std::stoi(argv[3]);
     int N = std::stoi(argv[4]);
     
+
     /* Use parsed parameters.
     std::cout << "Parsed Values:\n"
               << "lower: " << params.lower << "\n"
@@ -1005,7 +1013,7 @@ int main(int argc, char* argv[]) {
               << "dim: " << params.dim << "\n";
     */
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 2;
+    const int dim = 10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
 
@@ -1019,7 +1027,7 @@ int main(int argc, char* argv[]) {
     cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
     printf("Current stack size: %zu bytes\n", currentStackSize);
 
-    size_t newStackSize = 64  * 1024; // 1 MB per thread
+    size_t newStackSize = 64  * 1024; // 65 kB per thread
     cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
     if (err != cudaSuccess) {
         printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
