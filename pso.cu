@@ -492,105 +492,7 @@ __device__ double line_search(double f0, const double* x, const double* p, const
 
 } // util namespace end
 
-/*
-// A tiny PSO‐init on the host that fills `hostPsoArray[N*DIM]`
-void hostPSOInit(
-    auto FunctionEval,      // e.g. [&](double const* x){ return Function::evaluate(x); }
-    double lower, double upper,
-    double* hostPsoArray,   // [N*DIM] output
-    int N, int DIM,
-    int PSO_ITERS = 10)
-{
-    printf("[pso]");
-    //std::mt19937_64                      rng(1234);
-    //std::uniform_real_distribution<double> ud_pos(lower, upper);
-    uint64_t state = 1234;
-    auto rand01 = [&](){
-        state = state*6364136223846793005ULL + 1;
-        return double((state>>11)&((1ULL<<53)-1)) / double(1ULL<<53);
-    };
-    auto randR = [&](double lo,double hi){
-        return lo + (hi-lo) * rand01();
-    };
-
-        // --- 2) allocate plain C arrays
-    double* X        = new double[N*DIM];
-    double* V        = new double[N*DIM];
-    double* pBestX   = new double[N*DIM];
-    double* pBestVal = new double[N];
-    double* gBestX   = new double[DIM];
-    double  gBestVal;
-
-    // --- 3) initialize positions, velocities, and personal bests
-    double vel_range = (upper - lower) * 0.1;
-    for (int i = 0; i < N; ++i) {
-        for (int d = 0; d < DIM; ++d) {
-            X[i*DIM + d]      = randR(lower, upper);
-            V[i*DIM + d]      = randR(-vel_range, vel_range);
-            pBestX[i*DIM + d] = X[i*DIM + d];
-        }
-        pBestVal[i] = FunctionEval(&X[i*DIM]);
-    }
-
-    double vel_range = (upper - lower) * 0.1;
-    std::uniform_real_distribution<double> ud_vel(-vel_range, vel_range);
-    std::uniform_real_distribution<double> ud_unit(0.0, 1.0);
-
-    std::vector<double> X(N*DIM), V(N*DIM), pBestX(N*DIM);
-    std::vector<double> pBestVal(N,  1e300);
-
-    // init
-    for (int i = 0; i < N; ++i) {
-        for (int d = 0; d < DIM; ++d) {
-            X[i*DIM + d]      = ud_pos(rng);
-            V[i*DIM + d]      = ud_vel(rand01);
-            pBestX[i*DIM + d] = X[i*DIM + d];
-        }
-        pBestVal[i] = FunctionEval(&X[i*DIM]);
-	}
-    printf("inside pso after initi");
-    // find gBest
-    double gBestVal = pBestVal[0];
-    std::vector<double> gBestX(&pBestX[0], &pBestX[DIM]);
-
-    for (int i = 1; i < N; ++i) {
-        if (pBestVal[i] < gBestVal) {
-            gBestVal = pBestVal[i];
-            std::copy(&pBestX[i*DIM], &pBestX[i*DIM+DIM], gBestX.begin());
-        }
-    }
-    printf("we found gBest -> pso loop next");
-
-    // PSO loop
-    const double w=0.7, c1=1.4, c2=1.4;
-    for (int it = 0; it < PSO_ITERS; ++it) {
-        for (int i = 0; i < N; ++i) {
-            for (int d = 0; d < DIM; ++d) {
-                double r1 = ud_unit(rng), r2 = ud_unit(rng);
-                double vi = w*V[i*DIM+d]
-                           + c1*r1*(pBestX[i*DIM+d]-X[i*DIM+d])
-                           + c2*r2*(gBestX[d]      -X[i*DIM+d]);
-                V[i*DIM+d] = vi;
-                X[i*DIM+d] = std::clamp(X[i*DIM+d] + vi, lower, upper);
-            }
-            double f = FunctionEval(&X[i*DIM]);
-            if (f < pBestVal[i]) {
-                pBestVal[i] = f;
-                std::copy(&X[i*DIM], &X[i*DIM+DIM], &pBestX[i*DIM]);
-            }
-            if (f < gBestVal) {
-                gBestVal = f;
-                std::copy(&X[i*DIM], &X[i*DIM+DIM], gBestX.begin());
-            }
-        }
-    }
-    printf("after pso loop");
-    // write‐out
-    std::memcpy(hostPsoArray, X.data(), sizeof(double)*N*DIM);
-}
-*/
-// Put this in your .cu (host code only—no device decorations needed):
-
+// cpu pso code to initialize the array of N * DIM
 template<typename FuncEval>
 void hostPSOInit(
     FuncEval        FunctionEval,  // e.g. [&](const double* x){ return Function::evaluate(x); }
@@ -601,42 +503,36 @@ void hostPSOInit(
     int             DIM,
     int             PSO_ITERS = 10)
 {
-    printf("[pso] before random lambda\n");
-	    // --- 1) simple 64‑bit LCG for host randomness
+    // simple 64‑bit LCG for host randomness
     uint64_t state = 1234;
     auto rand01 = [&](){
       state = state * 6364136223846793005ULL + 1;
       return double((state >> 11) & ((1ULL<<53)-1)) / double(1ULL<<53);
     };
     auto randR = [&](double lo, double hi){
-      printf("inside randR\n");
 	    return lo + (hi - lo) * rand01();
     };
-    printf("before allocation\n");
-    // --- 2) allocate plain C arrays
+    //printf("before allocation\n");
+    // allocate arrays
     double* X        = new double[N*DIM];
     double* V        = new double[N*DIM];
     double* pBestX   = new double[N*DIM];
     double* pBestVal = new double[N];
     double* gBestX   = new double[DIM];
     double  gBestVal;
-    printf("initialize positions, velocities, and pbs.\n");
-    // --- 3) initialize positions, velocities, and personal bests
+    //printf("initialize positions, velocities, and pbs.\n");
+    // initialize positions, velocities, and personal bests
     double vel_range = (upper - lower) * 0.1;
     for (int i = 0; i < N; ++i) {
         for (int d = 0; d < DIM; ++d) {
-            
 	    X[i*DIM + d]      = randR(lower, upper);
             V[i*DIM + d]      = randR(-vel_range, vel_range);
             pBestX[i*DIM + d] = X[i*DIM + d];
         }
-	printf("before pbestval function eval");
         pBestVal[i] = FunctionEval(&X[i*DIM]);
-	printf("after pbestval function eval");
-
     }
-    printf("after initi, before gbest search");
-    // --- 4) find initial global best
+    //printf("after initi, before gbest search");
+    // find initial global best
     gBestVal = pBestVal[0];
     for (int d = 0; d < DIM; ++d)
         gBestX[d] = pBestX[d];
@@ -647,8 +543,8 @@ void hostPSOInit(
                 gBestX[d] = pBestX[i*DIM + d];
         }
     }
-    printf("we found gBest -> pso loop next");
-    // --- 5) PSO main loop
+    //printf("we found nitial gBesti %d -> pso loop next", gBestX[0]);
+    // pso  main loop
     const double w = 0.7, c1 = 1.4, c2 = 1.4;
     for (int it = 0; it < PSO_ITERS; ++it) {
         for (int i = 0; i < N; ++i) {
@@ -675,14 +571,11 @@ void hostPSOInit(
         }
     }
 
-    // --- 6) write final swarm positions back to hostPsoArray
+    //  write final swarm positions back to hostPsoArray
     for (int i = 0; i < N*DIM; ++i) {
         hostPsoArray[i] = X[i];
     }
-
-    printf("inside pso after init\n");
-
-    // --- 7) cleanup
+    // clean up 
     delete[] X;
     delete[] V;
     delete[] pBestX;
@@ -690,7 +583,7 @@ void hostPSOInit(
     delete[] gBestX;
 }
 
-/*
+/* dummy code
 template<typename FuncEval>
 void hostPSOInit(
     FuncEval funcEval,
