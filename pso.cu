@@ -224,7 +224,8 @@ __device__ double directional_derivative(const double *grad, const double *p, in
 
 
 template<int DIM>
-__device__ dual::DualNumber rosenbrock(const dual::DualNumber* x) {
+__device__
+dual::DualNumber rosenbrock(const dual::DualNumber* x) {
     dual::DualNumber sum = 0.0;
     for (int i = 0; i < DIM - 1; ++i) {
 	sum += dual::pow(1 - x[i],2) + 100 * dual::pow(x[i+1] - dual::pow(x[i], 2), 2); 
@@ -234,7 +235,8 @@ __device__ dual::DualNumber rosenbrock(const dual::DualNumber* x) {
 }
 
 template<int DIM>
-__host__ __device__ double rosenbrock(const double* x) {
+__host__ __device__
+double rosenbrock(const double* x) {
     double sum = 0.0;
     for (int i = 0; i < DIM - 1; ++i) {
         sum += 100 * (x[i + 1] - x[i] * x[i]) * (x[i + 1] - x[i] * x[i]) + (1 - x[i]) * (1 - x[i]);
@@ -243,7 +245,8 @@ __host__ __device__ double rosenbrock(const double* x) {
 }
 
 template<int DIM>
-__host__ __device__ dual::DualNumber rastrigin(const dual::DualNumber* x) {
+__device__
+dual::DualNumber rastrigin(const dual::DualNumber* x) {
     const double A = 10.0;
     dual::DualNumber sum(A * DIM, 0.0);
     for(int i=0; i<DIM; i++){
@@ -252,15 +255,11 @@ __host__ __device__ dual::DualNumber rastrigin(const dual::DualNumber* x) {
         sum = sum + (xi_sq - A * cterm);
     }
     return sum;
-    /*dual::DualNumber sum = 10 * DIM;
-    for (int i = 0; i < DIM; ++i) {
-        sum = sum + x[i] * x[i] - 10 * cos(2 * M_PI * x[i].real);
-    }
-    return sum;*/
 }
 
 template<int DIM>
-__host__ __device__ double rastrigin(const double* x) {
+__host__ __device__
+double rastrigin(const double* x) {
     const double A = 10.0;
     double val = A * DIM;
     for(int i=0; i<DIM; i++){
@@ -279,7 +278,7 @@ __host__ __device__ double rastrigin(const double* x) {
 
 template<int DIM>
 struct Rosenbrock {
-    __host__ __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         //printf("in dualrosen");
         return rosenbrock<DIM>(x);
     }
@@ -291,7 +290,7 @@ struct Rosenbrock {
 
 template<int DIM>
 struct Rastrigin {
-    __host__ __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         return rastrigin<DIM>(x);
     }
 
@@ -305,7 +304,8 @@ struct Rastrigin {
 //          - exp\Bigl(\frac{1}{d}\sum_{i=1}^{d}\cos(2\pi x_i)\Bigr)
 //          + 20 + e
 template<int DIM>
-__device__ dual::DualNumber ackley(const dual::DualNumber* x) {
+__device__
+dual::DualNumber ackley(const dual::DualNumber* x) {
     dual::DualNumber sum_sq = 0.0;
     dual::DualNumber sum_cos = 0.0;
     for (int i = 0; i < DIM; ++i) {
@@ -318,7 +318,8 @@ __device__ dual::DualNumber ackley(const dual::DualNumber* x) {
 }
 
 template<int DIM>
-__device__ double ackley(const double* x) {
+__host__ __device__
+double ackley(const double* x) {
     double sum_sq = 0.0;
     double sum_cos = 0.0;
     for (int i = 0; i < DIM; ++i) {
@@ -335,7 +336,7 @@ struct Ackley {
     __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         return ackley<DIM>(x);
     }
-    __device__ static double evaluate(const double* x) {
+    __host__ __device__ static double evaluate(const double* x) {
         return ackley<DIM>(x);
     }
 };
@@ -344,7 +345,8 @@ struct Ackley {
 //   f(x,y) = [1+(x+y+1)^2 (19-14x+3x^2-14y+6xy+3y^2)]
 //            [30+(2x-3y)^2 (18-32x+12x^2+48y-36xy+27y^2)]
 template<int DIM>
-__device__ dual::DualNumber goldstein_price(const dual::DualNumber* x) {
+__device__
+dual::DualNumber goldstein_price(const dual::DualNumber* x) {
     static_assert(DIM == 2, "Goldstein-Price is defined for 2 dimensions only.");
     dual::DualNumber x1 = x[0];
     dual::DualNumber x2 = x[1];
@@ -356,7 +358,8 @@ __device__ dual::DualNumber goldstein_price(const dual::DualNumber* x) {
 }
 
 template<int DIM>
-__device__ double goldstein_price(const double* x) {
+__host__ __device__
+double goldstein_price(const double* x) {
     static_assert(DIM == 2, "Goldstein-Price is defined for 2 dimensions only.");
     double x1 = x[0];
     double x2 = x[1];
@@ -372,7 +375,7 @@ struct GoldsteinPrice {
     __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         return goldstein_price<DIM>(x);
     }
-    __device__ static double evaluate(const double* x) {
+    __host__ __device__ static double evaluate(const double* x) {
         return goldstein_price<DIM>(x);
     }
 };
@@ -407,10 +410,10 @@ __device__ double eggholder(const double* x) {
 
 template<int DIM>
 struct Eggholder {
-    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+    __host__ __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         return eggholder<DIM>(x);
     }
-    __device__ static double evaluate(const double* x) {
+    __host__ __device__ static double evaluate(const double* x) {
         return eggholder<DIM>(x);
     }
 };
@@ -418,7 +421,8 @@ struct Eggholder {
 
 // Himmelblau's Function (2D only)
 template<int DIM>
-__device__ dual::DualNumber himmelblau(const dual::DualNumber* x) {
+__device__
+dual::DualNumber himmelblau(const dual::DualNumber* x) {
     static_assert(DIM == 2, "Himmelblau's function is defined for 2 dimensions only.");
     dual::DualNumber x1 = x[0], x2 = x[1];
     dual::DualNumber term1 = dual::pow(x1 * x1 + x2 - dual::DualNumber(11.0), 2);
@@ -427,7 +431,8 @@ __device__ dual::DualNumber himmelblau(const dual::DualNumber* x) {
 }
 
 template<int DIM>
-__device__ double himmelblau(const double* x) {
+__host__ __device__
+double himmelblau(const double* x) {
     static_assert(DIM == 2, "Himmelblau's function is defined for 2 dimensions only.");
     double x1 = x[0], x2 = x[1];
     double term1 = pow(x1 * x1 + x2 - 11.0, 2);
@@ -437,10 +442,10 @@ __device__ double himmelblau(const double* x) {
 
 template<int DIM>
 struct Himmelblau {
-    __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
+    __host__ __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
         return himmelblau<DIM>(x);
     }
-    __device__ static double evaluate(const double* x) {
+    __host__ __device__ static double evaluate(const double* x) {
         return himmelblau<DIM>(x);
     }
 };
@@ -530,8 +535,16 @@ void hostPSOInit(
             pBestX[i*DIM + d] = X[i*DIM + d];
         }
         pBestVal[i] = FunctionEval(&X[i*DIM]);
-    }
-    //printf("after initi, before gbest search");
+    
+    if (i < 3) {  // print first 3 particles
+      printf("init particle %2d: X = [", i);
+      for (int d = 0; d < DIM; ++d)
+        printf(" %8.4f", X[i*DIM + d]);
+      printf(" ]  V = [");
+      for (int d = 0; d < DIM; ++d)
+        printf(" %8.4f", V[i*DIM + d]);
+      printf(" ]  f(pi)=%.4e\n", pBestVal[i]);
+    } }
     // find initial global best
     gBestVal = pBestVal[0];
     for (int d = 0; d < DIM; ++d)
@@ -543,7 +556,10 @@ void hostPSOInit(
                 gBestX[d] = pBestX[i*DIM + d];
         }
     }
-    //printf("we found nitial gBesti %d -> pso loop next", gBestX[0]);
+    printf(" initial gBestVal = %.4e at position [", gBestVal);
+    for (int d = 0; d < DIM; ++d)
+      printf(" %8.4f", gBestX[d]);
+    printf(" ]\n");
     // pso  main loop
     const double w = 0.7, c1 = 1.4, c2 = 1.4;
     for (int it = 0; it < PSO_ITERS; ++it) {
@@ -570,6 +586,11 @@ void hostPSOInit(
             }
         }
     }
+    // print the best‐ever solution found
+    printf(" final gBestVal = %.6e  at gBestX = [", gBestVal);
+    for (int d = 0; d < DIM; ++d)
+        printf(" %8.4f", gBestX[d]);
+    printf(" ]\n");
 
     //  write final swarm positions back to hostPsoArray
     for (int i = 0; i < N*DIM; ++i) {
