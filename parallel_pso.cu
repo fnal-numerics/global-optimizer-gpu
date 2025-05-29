@@ -536,12 +536,16 @@ __global__ void psoInitKernel(
 
     const double vel_range = (upper - lower) * 0.1;
     // const unsigned int seed = 1234u;
-    unsigned int seedPos = 1234u ^ (i*7919u);
-    unsigned int seedVel = 2468u ^ (i*1613u);
+
+    unsigned int basePos = 1234u ^ (i * 0x9e3779b9);
+    unsigned int baseVel = 2468u ^ (i * 0x7f4a7c15);
     // init position & velocity
     for (int d = 0; d < DIM; ++d) {
-        double rx = util::generate_random_double(seedPos, lower, upper);
-        double rv = util::generate_random_double(seedVel, -vel_range, vel_range);
+        unsigned int seedX = basePos ^ (d * 0x85ebca6bu);
+        unsigned int seedV = baseVel ^ (d * 0xc2b2ae35u);
+
+        double rx = util::generate_random_double(seedX, lower, upper);
+        double rv = util::generate_random_double(seedV, -vel_range, vel_range);
         X[i*DIM + d]      = rx;
         V[i*DIM + d]      = rv;
         pBestX[i*DIM + d] = rx;
@@ -551,28 +555,12 @@ __global__ void psoInitKernel(
     double fval = Function::evaluate(&X[i*DIM]);
     pBestVal[i] = fval;
     
-    /*if (i < 3) {  // print first 3 particles
-      printf("init particle %2d: X = [", i);
-      for (int d = 0; d < DIM; ++d)
-        printf(" %8.4f", X[i*DIM + d]);
-      printf(" ]  V = [");
-      for (int d = 0; d < DIM; ++d)
-        printf(" %8.4f", V[i*DIM + d]);
-      printf(" ]  f(pi)=%.4e\n", pBestVal[i]);
-    }*/
-
     // atomic update of global best
     double oldGB = atomicMinDouble(gBestVal, fval);
     if (fval < oldGB) {
         // we’re the new champion: copy pBestX into gBestX
         for (int d = 0; d < DIM; ++d)
             gBestX[d] = pBestX[i*DIM + d];
-    }
-    if (i == 0) {
-        printf("initial gBestVal = %.4e at gBestX = [", gBestVal[0]);
-        for (int d = 0; d < DIM; ++d)
-            printf(" %7.4f", gBestX[d]);
-        printf(" ]\n");
     }
 }
 
@@ -599,12 +587,13 @@ __global__ void psoIterKernel(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
     // const unsigned int seedBase = 5678u + iter*2;
+    
     unsigned int base = 5678u + iter*1315423911u;
-    unsigned int seed1 = base ^ (i*DIM + 0);
-    unsigned int seed2 = base ^ (i*DIM + 1);
     // update velocity & position
     for (int d = 0; d < DIM; ++d) {
-        double r1 = util::generate_random_double(seed1, 0.0, 1.0);
+        unsigned int seed1 = base ^ (i*d + 0);
+        unsigned int seed2 = base ^ (i*d + 1);
+	double r1 = util::generate_random_double(seed1, 0.0, 1.0);
         double r2 = util::generate_random_double(seed2, 0.0, 1.0);
         if (i < 4 && iter == 0 && d == 0) 
             printf("Thread %d sees r1=%.3f, r2=%.3f\n", i, r1, r2);
@@ -644,10 +633,10 @@ __global__ void psoIterKernel(
         for (int d = 0; d < DIM; ++d)
             gBestX[d] = X[i*DIM + d];
     }
-    printf("it %d gBestVal = %.6f  at gBestX = [",i,fval);
+    /*printf("it %d gBestVal = %.6f  at gBestX = [",i,fval);
     for (int d = 0; d < DIM; ++d)
         printf(" %8.4f", gBestX[d]);
-    printf(" ]\n");
+    printf(" ]\n");*/
 }
 
 
@@ -858,7 +847,212 @@ cudaError_t writeTrajectoryData(
     return cudaSuccess;
 }
 
+template<typename Function, int DIM>
+cudaError_t launchOptimizeKernel(double       lower,
+                                 double       upper,
+                                 double*      hostResults,
+                                 int*         hostIndices,
+                                 double*      hostCoordinates,
+                                 int          N,
+                                 int          MAX_ITER,
+                                 std::string  fun_name)
+{
+    //–– 0) Prep occupancy for optimizeKernel ––
+    int blockSize, minGridSize;
+    cudaOccupancyMaxPotentialBlockSize(
+        &minGridSize, &blockSize,
+        optimizeKernel<Function,DIM,128>,
+        0, N);
+    printf("Recommended block size: %d\n", blockSize);
 
+    bool save_trajectories = askUser2saveTrajectories();
+    double* deviceTrajectory = nullptr;
+
+    //–– 1) Allocate PSO buffers on device ––
+    double *dX, *dV, *dPBestX, *dPBestVal, *dGBestX, *dGBestVal;
+    cudaMalloc(&dX,        N*DIM*sizeof(double));
+    cudaMalloc(&dV,        N*DIM*sizeof(double));
+    cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
+    cudaMalloc(&dPBestVal, N   *sizeof(double));
+    cudaMalloc(&dGBestX,   DIM *sizeof(double));
+    cudaMalloc(&dGBestVal, sizeof(double));
+
+    // seed gBestVal = +∞
+    {
+        double inf = std::numeric_limits<double>::infinity();
+        cudaMemcpy(dGBestVal, &inf, sizeof(inf), cudaMemcpyHostToDevice);
+    }
+
+    dim3 psoBlock(256);
+    dim3 psoGrid((N + psoBlock.x - 1) / psoBlock.x);
+
+    // host-side buffers for printing
+    double hostGBestVal;
+    std::vector<double> hostGBestX(DIM);
+
+    //–– 2) PSO‐init Kernel (timed + host‐print) ––
+    cudaEvent_t t0, t1;
+    cudaEventCreate(&t0);
+    cudaEventCreate(&t1);
+
+    cudaEventRecord(t0);
+    psoInitKernel<Function,DIM><<<psoGrid,psoBlock>>>(
+        Function(), lower, upper,
+        dX, dV,
+        dPBestX, dPBestVal,
+        dGBestX, dGBestVal,
+        N);
+    cudaDeviceSynchronize();
+    cudaEventRecord(t1);
+    cudaEventSynchronize(t1);
+
+    float ms_init=0;
+    cudaEventElapsedTime(&ms_init, t0, t1);
+    printf("PSO‑Init Kernel execution time = %.4f ms\n", ms_init);
+
+    // copy back and print initial global best
+    cudaMemcpy(&hostGBestVal, dGBestVal, sizeof(double),        cudaMemcpyDeviceToHost);
+    cudaMemcpy(hostGBestX.data(),  dGBestX,   DIM*sizeof(double), cudaMemcpyDeviceToHost);
+
+    printf("Initial PSO gBestVal = %.6e at gBestX = [", hostGBestVal);
+    for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
+    printf(" ]\n\n");
+
+    //–– 3) PSO iterations (each timed + host‐print) ––
+    const double w  = 0.5, c1 = 1.2, c2 = 1.2;
+    const int PSO_ITERS = 10;
+    for(int iter=1; iter<PSO_ITERS; ++iter) {
+        cudaEventRecord(t0);
+        psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
+            Function(),
+            lower, upper,
+            w, c1, c2,
+            dX, dV,
+            dPBestX, dPBestVal,
+            dGBestX, dGBestVal,
+            /*traj=*/nullptr,
+            /*saveTraj=*/false,
+            N, iter);
+        cudaDeviceSynchronize();
+        cudaEventRecord(t1);
+        cudaEventSynchronize(t1);
+
+        float ms_iter=0;
+        cudaEventElapsedTime(&ms_iter, t0, t1);
+        cudaMemcpy(&hostGBestVal, dGBestVal, sizeof(double),        cudaMemcpyDeviceToHost);
+        cudaMemcpy(hostGBestX.data(),  dGBestX,   DIM*sizeof(double), cudaMemcpyDeviceToHost);
+
+        printf("PSO‑Iter %2d execution time = %.3f ms   gBestVal = %.6e at [",
+               iter, ms_iter, hostGBestVal);
+        for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
+        printf(" ]\n");
+    }
+    printf("\n");
+
+    cudaEventDestroy(t0);
+    cudaEventDestroy(t1);
+
+    //–– 4) Prepare optimizer buffers & copy hostResults→device ––
+    double* deviceResults;
+    int*    deviceIndices;
+    double* deviceCoords;
+    cub::KeyValuePair<int,double>* deviceArgMin;
+    cudaMalloc(&deviceResults,    N * sizeof(double));
+    cudaMalloc(&deviceIndices,    N * sizeof(int));
+    cudaMalloc(&deviceCoords,     N * DIM * sizeof(double));
+    cudaMalloc(&deviceArgMin,     sizeof(*deviceArgMin));
+    cudaMemcpy(deviceResults, hostResults, N*sizeof(double), cudaMemcpyHostToDevice);
+
+    dim3 optBlock(blockSize);
+    dim3 optGrid((N + blockSize - 1) / blockSize);
+
+    //–– 5) optimizeKernel (already timed) ––
+    cudaEvent_t startOpt, stopOpt;
+    cudaEventCreate(&startOpt);
+    cudaEventCreate(&stopOpt);
+    cudaEventRecord(startOpt);
+
+    if (save_trajectories) {
+        cudaMalloc(&deviceTrajectory, N*MAX_ITER*DIM*sizeof(double));
+        optimizeKernel<Function,DIM,128>
+            <<<optGrid,optBlock>>>(
+                lower, upper,
+                dPBestX,
+                deviceResults,
+                deviceIndices,
+                deviceCoords,
+                deviceTrajectory,
+                N, MAX_ITER,
+                /*saveTraj=*/true);
+    } else {
+        optimizeKernel<Function,DIM,128>
+            <<<optGrid,optBlock>>>(
+                lower, upper,
+                dPBestX,
+                deviceResults,
+                deviceIndices,
+                deviceCoords,
+                /*traj=*/nullptr,
+                N, MAX_ITER);
+    }
+    cudaDeviceSynchronize();
+    cudaEventRecord(stopOpt);
+    cudaEventSynchronize(stopOpt);
+
+    float ms_opt=0;
+    cudaEventElapsedTime(&ms_opt, startOpt, stopOpt);
+    printf("\nOptimization Kernel execution time = %.3f ms\n", ms_opt);
+
+    cudaEventDestroy(startOpt);
+    cudaEventDestroy(stopOpt);
+
+    //–– 6) ArgMin & final print (same as before) ––
+    void*  d_temp_storage = nullptr;
+    size_t temp_bytes      = 0;
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+    cudaMalloc(&d_temp_storage, temp_bytes);
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+
+    cub::KeyValuePair<int,double> h_argMin;
+    cudaMemcpy(&h_argMin, deviceArgMin,
+               sizeof(h_argMin),
+               cudaMemcpyDeviceToHost);
+
+    int    globalMinIndex = h_argMin.key;
+    double globalMin      = h_argMin.value;
+
+    printf("\nFinal Global Minima: %f  (index %d)\n",
+           globalMin, globalMinIndex);
+
+    cudaMemcpy(hostCoordinates,
+               deviceCoords + size_t(globalMinIndex)*DIM,
+               DIM*sizeof(double),
+               cudaMemcpyDeviceToHost);
+
+    printf("Coordinates: [");
+    for(int d=0; d<DIM; ++d) printf(" %.7f", hostCoordinates[d]);
+    printf(" ]\n");
+    cudaFree(dX);
+    cudaFree(dV);
+    cudaFree(dPBestX);
+    cudaFree(dPBestVal);
+    cudaFree(dGBestX);
+    cudaFree(dGBestVal);
+
+    cudaFree(deviceResults);
+    cudaFree(deviceIndices);
+    cudaFree(deviceCoords);
+    cudaFree(deviceArgMin);
+    cudaFree(d_temp_storage);
+
+    return cudaSuccess;
+}
+
+/*
 template<typename Function, int DIM>
 cudaError_t launchOptimizeKernel(double       lower,
                                  double       upper,
@@ -924,8 +1118,8 @@ cudaError_t launchOptimizeKernel(double       lower,
                 dX, dV,
                 dPBestX, dPBestVal,
                 dGBestX, dGBestVal,
-                /*traj=*/nullptr,
-                /*saveTraj=*/false,
+                //traj=nullptr,
+                false,
                 N, iter);
     }
     cudaDeviceSynchronize();
@@ -962,7 +1156,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceCoords,
                 deviceTrajectory,
                 N, MAX_ITER,
-                /*saveTraj=*/true);
+                true);
     } else {
         optimizeKernel<Function,DIM,128>
             <<<optGrid,optBlock>>>(
@@ -971,7 +1165,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceResults,
                 deviceIndices,
                 deviceCoords,
-                /*traj=*/nullptr,
+                nullptr,
                 N, MAX_ITER);
     }
     cudaDeviceSynchronize();
@@ -1015,13 +1209,13 @@ cudaError_t launchOptimizeKernel(double       lower,
         printf("  x[%d] = %f\n", d, hostCoordinates[d]);
     }
 
-    // 8) Compute relative error vs. f* = 0.0 (for your suite of functions)
+    // compute relative error vs. f* = 0.0 (for your suite of functions)
     double fStar = 0.0;
     double error = (std::abs(fStar) > 0.0)
                    ? std::abs(globalMin - fStar) / std::abs(fStar)
                    : std::abs(globalMin);
 
-    // 9) Append to TSV log
+    // append to TSV log
     {
         std::string filename = std::to_string(DIM) + "d_results.tsv";
         std::ofstream out(filename, std::ios::app);
@@ -1042,7 +1236,7 @@ cudaError_t launchOptimizeKernel(double       lower,
         printf("results are saved to %s\n", filename.c_str());
     }
 
-    // 10) (optional) dump full trajectories back to host
+    // dump full trajectories back to host if user asked!
     if(save_trajectories){
         size_t trajSize = size_t(N) * MAX_ITER * DIM;
         double* hostTraj = new double[trajSize];
@@ -1057,13 +1251,13 @@ cudaError_t launchOptimizeKernel(double       lower,
         cudaFree(deviceTrajectory);
     }
 
-    // 11) Copy full result array back (if you still need it)
+    // copy full result array back (if you still need it)
     cudaMemcpy(hostResults,
                deviceResults,
                N*sizeof(double),
                cudaMemcpyDeviceToHost);
 
-    // 12) Clean up
+    // clean up
     cudaFree(dX);
     cudaFree(dV);
     cudaFree(dPBestX);
@@ -1079,6 +1273,7 @@ cudaError_t launchOptimizeKernel(double       lower,
 
     return cudaSuccess;
 }
+*/
 
 void swap(double* a, double* b) {
     double t = *a;
