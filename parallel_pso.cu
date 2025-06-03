@@ -727,37 +727,6 @@ __global__ void optimizeKernel(double lower, double upper,
 	//rosenbrock_gradient_device(x, g, DIM);
 	//util::calculateGradientUsingAD<Function, DIM>(x, g);
         
-	double grad_norm = 0.0;
-	for (int i = 0; i < DIM; ++i) { grad_norm += g[i] * g[i];}
-        grad_norm = sqrt(grad_norm);
-	if (grad_norm < tolerance) {
-            // atomically increment the “how many have converged” counter:
-            int oldCount = atomicAdd(&d_convergedCount, 1);
-            int newCount = oldCount + 1; 
-            double fcurr = Function::evaluate(x);
-	    // now newCount == (number of threads that have now reported convergence).
-            printf("\nconverged for %d at iter=%d); f = %.6f; coords = [",idx, iter,fcurr);
-            for (int d = 0; d < DIM; ++d) {
-                printf(" % .6f", x[d]);
-            }
-            printf(" ]\n");
-	    // if we just hit the threshold K set by the user, the VERY FIRST thread to do so
-            // sets d_stopFlag=1 so everyone else exits on their next check.
-            if (newCount == requiredConverged) {
-                // flip the global stop flag
-                atomicExch(&d_stopFlag, 1);
-                __threadfence(); 
-                printf(
-                  "\nThread %d is the %d%s converged thread (iter=%d); setting stopFlag.\n",
-                  idx, newCount,
-                  (newCount==1? "st" : newCount==2? "nd" : newCount==3? "rd" : "th"),
-                  iter
-                );
-            }
-            // in _any_ case (whether we were the kth or not), 
-	    // we are individually “done,” so break
-            break;
-        }
 
 	//d0 = 0.0;
         // compute the search direction p = -H * g
@@ -807,7 +776,38 @@ __global__ void optimizeKernel(double lower, double upper,
 	      g[i] = g_new[i];
 	   } 
 	}
-	
+
+        double grad_norm = 0.0;
+        for (int i = 0; i < DIM; ++i) { grad_norm += g[i] * g[i];}
+        grad_norm = sqrt(grad_norm);
+        if (grad_norm < tolerance) {
+            // atomically increment the “how many have converged” counter:
+            int oldCount = atomicAdd(&d_convergedCount, 1);
+            int newCount = oldCount + 1;
+            double fcurr = Function::evaluate(x);
+            // now newCount == (number of threads that have now reported convergence).
+            //printf("\nconverged for %d at iter=%d); f = %.6f;",idx, iter,fcurr);
+            //for (int d = 0; d < DIM; ++d) { printf(" % .6f", x[d]);}
+            //printf(" ]\n");
+            
+	    // if we just hit the threshold K set by the user, the VERY FIRST thread to do so
+            // sets d_stopFlag=1 so everyone else exits on their next check.
+            if (newCount == requiredConverged) {
+                // flip the global stop flag
+                atomicExch(&d_stopFlag, 1);
+                __threadfence();
+                printf(
+                  "\nThread %d is the %d%s converged thread (iter=%d); fn = %.6f.\n",
+                  idx, newCount,
+                  (newCount==1? "st" : newCount==2? "nd" : newCount==3? "rd" : "th"),
+                  iter,fcurr
+                );
+            }
+            // in _any_ case (whether we were the kth or not), 
+            // we are individually “done,” so break
+            break;
+        }
+
 	//  deviceTrajectory layout: idx * (MAX_ITER * DIM) + iter * DIM + i
 	if (save_trajectories) {
 	   for (int i = 0; i < DIM; i++) {
@@ -903,95 +903,95 @@ cudaError_t launchOptimizeKernel(double       lower,
 
     bool save_trajectories = askUser2saveTrajectories();
     double* deviceTrajectory = nullptr;
+    double *dX=nullptr, *dV=nullptr, *dPBestVal=nullptr, *dGBestX=nullptr, *dGBestVal=nullptr, *dPBestX=nullptr;
+    float ms_init, ms_pso, ms_opt; 
+    if(PSO_ITER > 0) {
+        // allocate PSO buffers on device
+        double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal;
+        cudaMalloc(&dX,        N*DIM*sizeof(double));
+        cudaMalloc(&dV,        N*DIM*sizeof(double));
+        cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
+        cudaMalloc(&dPBestVal, N   *sizeof(double));
+        cudaMalloc(&dGBestX,   DIM *sizeof(double));
+        cudaMalloc(&dGBestVal, sizeof(double));
+        int zero = 0;
+        cudaMemcpyToSymbol(d_stopFlag, &zero, sizeof(int)); 
+        cudaMemcpyToSymbol(d_threadsRemaining, &N, sizeof(int));
+        cudaMemcpyToSymbol(d_convergedCount,   &zero, sizeof(int));
+        // set seed to infinity
+        {
+            double inf = std::numeric_limits<double>::infinity();
+            cudaMemcpy(dGBestVal, &inf, sizeof(inf), cudaMemcpyHostToDevice);
+    	}
 
-    // allocate PSO buffers on device
-    double *dX, *dV, *dPBestX, *dPBestVal, *dGBestX, *dGBestVal;
-    cudaMalloc(&dX,        N*DIM*sizeof(double));
-    cudaMalloc(&dV,        N*DIM*sizeof(double));
-    cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
-    cudaMalloc(&dPBestVal, N   *sizeof(double));
-    cudaMalloc(&dGBestX,   DIM *sizeof(double));
-    cudaMalloc(&dGBestVal, sizeof(double));
-    int zero = 0;
-    cudaMemcpyToSymbol(d_stopFlag, &zero, sizeof(int)); 
-    cudaMemcpyToSymbol(d_threadsRemaining, &N, sizeof(int));
-    cudaMemcpyToSymbol(d_convergedCount,   &zero, sizeof(int));
-    // set seed to infinity
-    {
-        double inf = std::numeric_limits<double>::infinity();
-        cudaMemcpy(dGBestVal, &inf, sizeof(inf), cudaMemcpyHostToDevice);
-    }
+	dim3 psoBlock(256);
+        dim3 psoGrid((N + psoBlock.x - 1) / psoBlock.x);
 
-    dim3 psoBlock(256);
-    dim3 psoGrid((N + psoBlock.x - 1) / psoBlock.x);
+        // host-side buffers for printing
+        double hostGBestVal;
+        std::vector<double> hostGBestX(DIM);
 
-    // host-side buffers for printing
-    double hostGBestVal;
-    std::vector<double> hostGBestX(DIM);
+        // PSO‐init Kernel
+        cudaEvent_t t0, t1;
+        cudaEventCreate(&t0);
+        cudaEventCreate(&t1);
 
-    // PSO‐init Kernel
-    cudaEvent_t t0, t1;
-    cudaEventCreate(&t0);
-    cudaEventCreate(&t1);
-
-    cudaEventRecord(t0);
-    psoInitKernel<Function,DIM><<<psoGrid,psoBlock>>>(
-        Function(), lower, upper,
-        dX, dV,
-        dPBestX, dPBestVal,
-        dGBestX, dGBestVal,
-        N,1234567);
-    cudaDeviceSynchronize();
-    cudaEventRecord(t1);
-    cudaEventSynchronize(t1);
-
-    float ms_init=0;
-    cudaEventElapsedTime(&ms_init, t0, t1);
-    printf("PSO‑Init Kernel execution time = %.4f ms\n", ms_init);
-
-    // copy back and print initial global best
-    cudaMemcpy(&hostGBestVal, dGBestVal, sizeof(double),        cudaMemcpyDeviceToHost);
-    cudaMemcpy(hostGBestX.data(),  dGBestX,   DIM*sizeof(double), cudaMemcpyDeviceToHost);
-
-    printf("Initial PSO gBestVal = %.6e at gBestX = [", hostGBestVal);
-    for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
-    printf(" ]\n\n");
-
-    // PSO iterations (each timed + host‐print) ––
-    const double w  = 0.5, c1 = 1.2, c2 = 1.5;
-
-    float ms_pso = ms_init;
-    for(int iter=1; iter<PSO_ITER; ++iter) {
         cudaEventRecord(t0);
-        psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
-            Function(),
-            lower, upper,
-            w, c1, c2,
-            dX, dV,
-            dPBestX, dPBestVal,
-            dGBestX, dGBestVal,
-            /*traj=*/nullptr,
-            /*saveTraj=*/false,
-            N, iter, 1234567);
+        psoInitKernel<Function,DIM><<<psoGrid,psoBlock>>>(
+             Function(), lower, upper,
+             dX, dV,
+             dPBestX, dPBestVal,
+             dGBestX, dGBestVal,
+             N,1234567);
         cudaDeviceSynchronize();
         cudaEventRecord(t1);
         cudaEventSynchronize(t1);
 
-        float ms_iter=0;
-        cudaEventElapsedTime(&ms_iter, t0, t1);
+        cudaEventElapsedTime(&ms_init, t0, t1);
+        printf("PSO‑Init Kernel execution time = %.4f ms\n", ms_init);
+
+        // copy back and print initial global best
         cudaMemcpy(&hostGBestVal, dGBestVal, sizeof(double),        cudaMemcpyDeviceToHost);
         cudaMemcpy(hostGBestX.data(),  dGBestX,   DIM*sizeof(double), cudaMemcpyDeviceToHost);
 
-        printf("PSO‑Iter %2d execution time = %.3f ms   gBestVal = %.6e at [",
-               iter, ms_iter, hostGBestVal);
+        printf("Initial PSO gBestVal = %.6e at gBestX = [", hostGBestVal);
         for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
-        printf(" ]\n");
-	ms_pso += ms_iter;
-    }// end pso loop
-    printf("total pso time = %.3f\n", ms_pso);
+        printf(" ]\n\n");
 
-    cudaEventDestroy(t0);
-    cudaEventDestroy(t1);
+        // PSO iterations (each timed + host‐print) ––
+        const double w  = 0.5, c1 = 1.2, c2 = 1.5;
+        for(int iter=1; iter<PSO_ITER+1; ++iter) {
+            cudaEventRecord(t0);
+            psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
+                Function(),
+                lower, upper,
+                w, c1, c2,
+                dX, dV,
+                dPBestX, dPBestVal,
+                dGBestX, dGBestVal,
+                /*traj=*/nullptr,
+                /*saveTraj=*/false,
+                N, iter, 1234567);
+            cudaDeviceSynchronize();
+            cudaEventRecord(t1);
+            cudaEventSynchronize(t1);
+
+            float ms_iter=0;
+            cudaEventElapsedTime(&ms_iter, t0, t1);
+            cudaMemcpy(&hostGBestVal, dGBestVal, sizeof(double),        cudaMemcpyDeviceToHost);
+            cudaMemcpy(hostGBestX.data(),  dGBestX,   DIM*sizeof(double), cudaMemcpyDeviceToHost);
+
+            printf("PSO‑Iter %2d execution time = %.3f ms   gBestVal = %.6e at [",iter, ms_iter, hostGBestVal);
+            for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
+            printf(" ]\n");
+	    ms_pso += ms_iter;
+        }// end pso loop
+        printf("total pso time = %.3f\n", ms_pso);
+
+        cudaEventDestroy(t0);
+        cudaEventDestroy(t1);
+    }// end if pso_iter > 0
+
 
     // prepare optimizer buffers & copy hostResults→device ––
     double* deviceResults;
@@ -1040,7 +1040,6 @@ cudaError_t launchOptimizeKernel(double       lower,
     cudaEventRecord(stopOpt);
     cudaEventSynchronize(stopOpt);
 
-    float ms_opt=0;
     cudaEventElapsedTime(&ms_opt, startOpt, stopOpt);
     printf("\nOptimization Kernel execution time = %.3f ms\n", ms_opt);
 
@@ -1089,10 +1088,16 @@ cudaError_t launchOptimizeKernel(double       lower,
     {
         std::string filename = std::to_string(DIM) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
-        // Convert kernel time from milliseconds to seconds.
-        double time_seconds = (ms_init+ms_pso+ms_opt) / 1000.0;
-        outfile << fun_name << "\t" << N << "\t" << MAX_ITER << "\t"
-            << std::fixed << std::setprecision(17) << time_seconds << "\t"
+        double time_seconds = std::numeric_limits<double>::infinity();
+	if (PSO_ITER > 0) {
+	    time_seconds = (ms_init+ms_pso+ms_opt);
+	    printf("total time = pso + bfgs = total time = %0.2f milliseconds", time_seconds);
+	} else {
+	    time_seconds = ms_opt;
+	    printf("bfgs time = total time = %.2f milliseconds", time_seconds);
+	}	
+	outfile << fun_name << "\t" << N << "\t" << MAX_ITER << "\t" << PSO_ITER << "\t"
+            << std::fixed << std::setprecision(25) << time_seconds << "\t"
             << error << "\t"
             << globalMin << "\t";
         for (int i = 0; i < DIM; i++) {
@@ -1104,13 +1109,14 @@ cudaError_t launchOptimizeKernel(double       lower,
         outfile.close();
         printf("results are saved to %s", filename.c_str());
     }
-
+    if(PSO_ITER > 0) {
     cudaFree(dX);
     cudaFree(dV);
     cudaFree(dPBestX);
     cudaFree(dPBestVal);
     cudaFree(dGBestX);
     cudaFree(dGBestVal);
+    }
 
     cudaFree(deviceResults);
     cudaFree(deviceIndices);
@@ -1244,7 +1250,7 @@ int main(int argc, char* argv[]) {
     int N = std::stoi(argv[6]);
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim =10;
+    const int dim = 5;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
