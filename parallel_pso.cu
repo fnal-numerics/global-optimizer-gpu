@@ -459,7 +459,6 @@ struct Himmelblau {
     }
 };
 
-
 template<typename Function, int DIM>
 __device__ void calculateGradientUsingAD(double *x, double *gradient) {
     dual::DualNumber xDual[DIM];
@@ -477,115 +476,6 @@ __device__ void calculateGradientUsingAD(double *x, double *gradient) {
         xDual[i].dual = 0.0;
     }
 }
-
-// -----------------------------------------------------------------------------
-// Stateless SplitMix64 → double in [0,1)
-// -----------------------------------------------------------------------------
-__device__ inline uint64_t splitmix64(uint64_t x) {
-    x += 0x9E3779B97F4A7C15ULL;
-    x  = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    x  = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
-    return x ^ (x >> 31);
-}
-
-__device__ inline double toUniformDouble(uint64_t v) {
-    // take top 53 bits, divide by 2^53
-    return (v >> 11) * (1.0/9007199254740992.0);
-}
-
-// -----------------------------------------------------------------------------
-// One‑call stateless uniform in [lo,hi):
-//   tid    = particle/thread index
-//   dim    = dimension index (0 ≤ dim < dims)
-//   iter   = PSO iteration count
-//   seed   = your 64‑bit master seed
-//   lo,hi  = output range
-// -----------------------------------------------------------------------------
-__device__ inline double statelessUniform(
-    uint32_t    tid,
-    uint32_t    dim,
-    uint32_t    iter,
-    uint64_t    seed,
-    double      lo,
-    double      hi)
-{
-    // pack a unique 64‑bit counter: tid in low bits, then dim, then iter
-    uint64_t ctr =  (uint64_t)tid
-                  | ((uint64_t)dim  << 26)   // up to 2^4 dims in bits 26–29
-                  | ((uint64_t)iter << 30);  // up to 2^34 iterations in bits 30–63
-    // mix in the seed (optional xor)
-    ctr ^= seed;
-
-    // scramble → uniform [0,1)
-    uint64_t rnd = splitmix64(ctr);
-    double   u   = toUniformDouble(rnd);
-
-    // scale to [lo,hi)
-    return lo + (hi - lo) * u;
-}
-
-
-/*
-__device__ curandState* d_rngStates;
-// allocate in device global memory
-//__device__ curandState d_rngStates[MAX_RNG_STATES];
-
-__global__ void _initRNG(curandState* states,unsigned long long seed,int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
-    // sequence = idx, offset = 0
-    curand_init(seed, idx, 0, &states[idx]);
-}
-
-// --- host helper to allocate + launch init ---
-void initRNGStates(unsigned long long seed, int nStates) {
-    // allocate device memory
-    curandState* tmp;
-    cudaMalloc(&tmp, nStates * sizeof(curandState));
-    // bind pointer into the device symbol
-    cudaMemcpyToSymbol(d_rngStates, &tmp, sizeof(tmp));
-    // launch init‐kernel
-    const int block = 256;
-    const int grid  = (nStates + block - 1) / block;
-    _initRNG<<<grid, block>>>(tmp, seed, nStates);
-    cudaDeviceSynchronize();
-}
-
-void initRNGStates(unsigned long long seed, int nStates) {
-    int block = 256, grid = (nStates + block - 1) / block;
-    _initRNG<<<grid,block>>>(d_rngStates, seed, nStates);
-    cudaDeviceSynchronize();
-}
-
-
-__device__ inline double fastRandomDouble(int stateIdx,
-                                          double lo, double hi) {
-    // read the pointer we stored in the symbol
-    curandState* states = d_rngStates;
-    curandState  local  = states[stateIdx];
-    double       u      = curand_uniform_double(&local);
-    states[stateIdx]   = local;
-    return lo + (hi - lo) * u;
-}
-__device__ inline double fastRandomDouble(int stateIdx, double lo, double hi) {
-    // pull state into registers
-    curandState local = d_rngStates[stateIdx];
-    // generate one uniform in [0,1)
-    double u = curand_uniform_double(&local);
-    // write back updated state
-    d_rngStates[stateIdx] = local;
-    // scale to [lo,hi)
-    return lo + (hi - lo) * u;
-}*/
-
-/*__device__ inline double fastRandomDouble(int stateIdx, double lo, double hi) {
-    // read & update state
-    curandState local = d_rngStates[stateIdx];
-    double u = curand_uniform_double(&local);
-    d_rngStates[stateIdx] = local;              // write back
-    return lo + (hi - lo) * u;
-}*/
-
 
 __device__ double generate_random_double(unsigned int seed, double lower, double upper)
 { 
@@ -661,21 +551,10 @@ __global__ void psoInitKernel(
     for (int d = 0; d < DIM; ++d) {
         unsigned int seedX = basePos ^ (d * 0x85ebca6bu);
         unsigned int seedV = baseVel ^ (d * 0xc2b2ae35u);
-	//    double rx = randUniform(lower, upper,i, d,0, seed);  // iter==0 during init
-	//    double rv = randUniform(-vel_range, vel_range,i, d, 1, seed);
         double rx = util::generate_random_double(seedX, lower, upper);
 	double rv = util::generate_random_double(seedV, -vel_range, vel_range);
-/*    	    double rx = philox_uniform( (uint64_t)i,
-                            (uint64_t)d,        // <— unique per dim
-                            seed,
-                            lower, upper);
-        double rv = philox_uniform( (uint64_t)i,
-                            (uint64_t)d | 0x40000000u, // <— different stream
-                            seed,
-                            -vel_range, vel_range);
- */       //double rx = fastR.xoshiro256p_Range<double>(lower,upper);// util::statelessUniform(i,d,1,seed, lower, upper);// util::generate_random_double(seedX, lower, upper);
-        //double rv = util::statelessUniform(i,d,1,seed, -vel_range, vel_range);// util::generate_random_double(seedV, -vel_range, vel_range);
-        X[i*DIM + d]      = rx;
+        
+	X[i*DIM + d]      = rx;
         V[i*DIM + d]      = rv;
         pBestX[i*DIM + d] = rx;
     }
@@ -805,7 +684,7 @@ __global__ void optimizeKernel(double lower, double upper,
 
     //unsigned int seed = 1;
     //unsigned int seed = 456;
-    // --- 1) initialize x either from PSO array or (fallback) by RNG
+    // initialize x either from PSO array or (fallback) by RNG
     if (pso_array) {
         #pragma unroll
         for (int d = 0; d < DIM; ++d) {
@@ -815,7 +694,8 @@ __global__ void optimizeKernel(double lower, double upper,
         unsigned int seed = 456;
         #pragma unroll
         for (int d = 0; d < DIM; ++d) {
-            x[d] = util::statelessUniform(idx,d,1,lower, upper, seed); //util::generate_random_double(seed + idx*DIM + d, lower, upper);
+            //x[d] = util::statelessUniform(idx,d,1,lower, upper, seed);
+	    x[d] = util::generate_random_double(seed + idx*DIM + d, lower, upper);
         }
     }	
     /*for (int i = 0; i < DIM; ++i) {
@@ -832,9 +712,10 @@ __global__ void optimizeKernel(double lower, double upper,
     util::calculateGradientUsingAD<Function, DIM>(x, g);
     for (int iter = 0; iter < MAX_ITER; ++iter) {
         // check if somebody already asked to stop
-	if (atomicAdd(&d_stopFlag, 0) != 0) { // atomicAdd here 
-		/*just to get a strong read‐barrier: CUDA will fetch a coherent copy of the integer from global memory. As soon as one thread writes 1 into d_stopFlag (via atomicExch), the next time any thread does atomicAdd(&d_stopFlag, 0) it’ll see 1 and break.
-		   */
+	if (atomicAdd(&d_stopFlag, 0) != 0) { // atomicAdd here just to get a strong read-barrier 
+            // CUDA will fetch a coherent copy of the integer from global memory. 
+	    // as soon as one thread writes 1 into d_stopFlag via atomicExch, 
+	    // the next time any thread does atomicAdd(&d_stopFlag, 0) it’ll see 1 and break.	   
             //printf("thread %d get outta dodge cuz we converged...", idx);
             break;
         }
@@ -1009,6 +890,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                                  double*      hostCoordinates,
                                  int          N,
                                  int          MAX_ITER,
+				 int 	      PSO_ITER,
 				 int	      requiredConverged,
                                  std::string  fun_name)
 {
@@ -1077,9 +959,9 @@ cudaError_t launchOptimizeKernel(double       lower,
 
     // PSO iterations (each timed + host‐print) ––
     const double w  = 0.5, c1 = 1.2, c2 = 1.5;
-    const int PSO_ITERS = 10;
+
     float ms_pso = ms_init;
-    for(int iter=1; iter<PSO_ITERS; ++iter) {
+    for(int iter=1; iter<PSO_ITER; ++iter) {
         cudaEventRecord(t0);
         psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
             Function(),
@@ -1105,7 +987,7 @@ cudaError_t launchOptimizeKernel(double       lower,
         for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
         printf(" ]\n");
 	ms_pso += ms_iter;
-    }
+    }// end pso loop
     printf("total pso time = %.3f\n", ms_pso);
 
     cudaEventDestroy(t0);
@@ -1240,7 +1122,7 @@ cudaError_t launchOptimizeKernel(double       lower,
 }// end launcher
 
 template<typename Function, int DIM>
-void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER,int requiredConverged, std::string fun_name) {
+void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
     /*printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
@@ -1248,7 +1130,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     }
     printf("\n");
     */
-    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, requiredConverged, fun_name);
+    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
@@ -1279,7 +1161,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
 template<int dim>
 void selectAndRunOptimization(double lower, double upper,
                               double* hostResults, int* hostIndices,
-                              double* hostCoordinates, int N, int MAX_ITER,int requiredConverged) {
+                              double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged) {
     int choice;
     std::cout << "\nSelect function to optimize:\n"
               << " 1. Rosenbrock\n"
@@ -1299,22 +1181,22 @@ void selectAndRunOptimization(double lower, double upper,
     switch(choice) {
         case 1:
             std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,requiredConverged,"rosenbrock");
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged,"rosenbrock");
             break;
         case 2:
             std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,requiredConverged, "rastrigin");
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "rastrigin");
             break;
         case 3:
             std::cout << "\n\n\tAckley Function\n" << std::endl;
-            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,requiredConverged, "ackley");
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "ackley");
             break;
         case 4:
             if constexpr (dim != 2) {
                 std::cerr << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,requiredConverged, "goldstein");
+                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "goldstein");
             }
             break;
         case 5:
@@ -1322,7 +1204,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tEggholder Function\n" << std::endl;
-                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,requiredConverged, "eggholder");
+                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "eggholder");
             }
             break;
         case 6:
@@ -1330,7 +1212,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,requiredConverged, "himmelblau");
+                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "himmelblau");
             }
             break;
         case 7:
@@ -1349,48 +1231,46 @@ void selectAndRunOptimization(double lower, double upper,
 #ifndef UNIT_TEST
 int main(int argc, char* argv[]) {
     printf("Production main() running\n");
-    if (argc != 6) {
-	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <converged> <number_of_optimizations\n";
+    if (argc != 7) {
+	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <pso_iters> <converged> <number_of_optimizations\n";
         return 1;
     }
     double lower = std::atof(argv[1]);
     double upper = std::atof(argv[2]);   	
 
     int MAX_ITER = std::stoi(argv[3]);
-    int requiredConverged = std::stoi(argv[4]);
-    int N = std::stoi(argv[5]);
+    int PSO_ITERS = std::stoi(argv[4]);
+    int requiredConverged = std::stoi(argv[5]);
+    int N = std::stoi(argv[6]);
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
     const int dim =10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
-
      
     int hostIndices[N];
     double hostCoordinates[dim];
     double f0 = 333777; // initial function value
 
-
+    // logic to set the stact size limit to 65 kB per thread 
     size_t currentStackSize = 0;
     cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
     printf("Current stack size: %zu bytes\n", currentStackSize);
-
-    size_t newStackSize = 64  * 1024; // 65 kB per thread
+    size_t newStackSize = 64  * 1024; // 65 kB
     cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
     if (err != cudaSuccess) {
         printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
         return 1;
     } else {
             printf("Successfully set stack size to %zu bytes\n", newStackSize);
-    }
-
+    }// end stack size limit
 
     char cont = 'y';
     while (cont == 'y' || cont == 'Y') {
         for (int i = 0; i < N; i++) {
             hostResults[i] = f0;
         }
-        selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER, requiredConverged);
+        selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged);
         std::cout << "\nDo you want to optimize another function? (y/n): ";
         std::cin >> cont;
         std::cin.ignore();
