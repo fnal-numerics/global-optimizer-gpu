@@ -126,6 +126,15 @@ __device__ void outer_product_device(const double* v1, const double* v2, double*
     }
 }
 
+template<int DIM>
+__device__ double calculate_gradient_norm(const double* g) {
+    double grad_norm = 0.0;
+    for (int i = 0; i < DIM; ++i) {
+        grad_norm += g[i] * g[i];
+    }
+    return sqrt(grad_norm);
+}
+
 // wrap kernel definitions extern "C" block so that their symbols are exported with C linkage
 extern "C" {
 __device__ __noinline__ void vector_add(const double* a, const double* b, double* result, int size) {
@@ -648,8 +657,14 @@ __global__ void psoIterKernel(
     printf(" ]\n");*/
 }
 
-
-//const int MAX_ITER = 64;
+template<int DIM>
+struct Result {
+    int status; // 1 if converged, else if stopped_bc_someone_flipped_the_flag: 2, else 0
+    double fval; // function value
+    double gradientNorm;
+    double coordinates[DIM];
+    int iter;
+};
 
 __device__ int d_stopFlag;  // 0 = keep going; 1 = stop immediately
 __device__ int d_convergedCount; // how many threads have converged?
@@ -658,7 +673,7 @@ __device__ int d_threadsRemaining;
 template<typename Function, int DIM, unsigned int blockSize>
 __global__ void optimizeKernel(double lower, double upper,
 		const double* __restrict__ pso_array, // pso initialized positions
-		double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged,double tolerance, bool save_trajectories = false) {
+		double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged,double tolerance, Result<DIM>* result, bool save_trajectories = false) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
 //__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
@@ -674,6 +689,15 @@ __global__ void optimizeKernel(double lower, double upper,
     double g[DIM], x[DIM], x_new[DIM], p[DIM], g_new[DIM], delta_x[DIM], delta_g[DIM];//, new_direction[DIM];
     //double tolerance = 1e-5;
     // Line Search params
+
+    Result<DIM> r;
+    r.status       = -1;     // assume “not converged” by default
+    r.fval         = 333777.0;
+    r.gradientNorm = 0.0;
+    for (int d = 0; d < DIM; ++d) {
+        r.coordinates[d] = 0.0;
+    }
+    r.iter = -1;
 
     util::initialize_identity_matrix(H, DIM);
     //unsigned int seed = 135;
@@ -698,26 +722,29 @@ __global__ void optimizeKernel(double lower, double upper,
 	    x[d] = util::generate_random_double(seed + idx*DIM + d, lower, upper);
         }
     }	
-    /*for (int i = 0; i < DIM; ++i) {
-        x[i] = util::generate_random_double(seed+idx*DIM+i, lower, upper);// devicePoints[i * dim + idx];
-        //deviceStartingPositions[idx * DIM + i] = x[i];
-        //printf("x[%d]: %f",i,x[i]);//<<std::endl;
-    }*/
+    
     double f0 = Function::evaluate(x);//rosenbrock_device(x, DIM);
     deviceResults[idx] = f0;
     double bestVal = f0;
     if (idx == 0) {
        printf("\n\nf0 = %f", f0);
     }
+    int iter;
     util::calculateGradientUsingAD<Function, DIM>(x, g);
-    for (int iter = 0; iter < MAX_ITER; ++iter) {
+    for (iter = 0; iter < MAX_ITER; ++iter) {
         // check if somebody already asked to stop
 	if (atomicAdd(&d_stopFlag, 0) != 0) { // atomicAdd here just to get a strong read-barrier 
             // CUDA will fetch a coherent copy of the integer from global memory. 
 	    // as soon as one thread writes 1 into d_stopFlag via atomicExch, 
 	    // the next time any thread does atomicAdd(&d_stopFlag, 0) it’ll see 1 and break.	   
             //printf("thread %d get outta dodge cuz we converged...", idx);
+            r.status = 2;
+            r.iter = iter;
+	    r.fval = Function::evaluate(x);
+            for(int d=0;d<DIM;d++){r.coordinates[d] = x[d];}
+            r.gradientNorm = util::calculate_gradient_norm<DIM>(g); 
             break;
+            
         }
 	num_steps++;
 	//printf("idx = %d", idx);
@@ -727,7 +754,6 @@ __global__ void optimizeKernel(double lower, double upper,
 	//rosenbrock_gradient_device(x, g, DIM);
 	//util::calculateGradientUsingAD<Function, DIM>(x, g);
         
-
 	//d0 = 0.0;
         // compute the search direction p = -H * g
         for (int i = 0; i < DIM; i++) {
@@ -776,10 +802,8 @@ __global__ void optimizeKernel(double lower, double upper,
 	      g[i] = g_new[i];
 	   } 
 	}
-
-        double grad_norm = 0.0;
-        for (int i = 0; i < DIM; ++i) { grad_norm += g[i] * g[i];}
-        grad_norm = sqrt(grad_norm);
+        
+        double grad_norm = util::calculate_gradient_norm<DIM>(g);
         if (grad_norm < tolerance) {
             // atomically increment the “how many have converged” counter:
             int oldCount = atomicAdd(&d_convergedCount, 1);
@@ -789,7 +813,13 @@ __global__ void optimizeKernel(double lower, double upper,
             //printf("\nconverged for %d at iter=%d); f = %.6f;",idx, iter,fcurr);
             //for (int d = 0; d < DIM; ++d) { printf(" % .6f", x[d]);}
             //printf(" ]\n");
-            
+            r.status       = 1;
+            r.gradientNorm = grad_norm;
+            r.fval         = Function::evaluate(x);
+            r.iter         = iter;
+            for (int d = 0; d < DIM; ++d) {
+                r.coordinates[d] = x[d];
+            }	    
 	    // if we just hit the threshold K set by the user, the VERY FIRST thread to do so
             // sets d_stopFlag=1 so everyone else exits on their next check.
             if (newCount == requiredConverged) {
@@ -817,7 +847,13 @@ __global__ void optimizeKernel(double lower, double upper,
 
 	//for(int i=0; i<DIM; ++i) {x[i] = x_new[i];}
     }// end outer for
-
+    if(MAX_ITER == iter) {
+        r.status = 0; // surrender
+        r.iter = iter;
+        r.gradientNorm = util::calculate_gradient_norm<DIM>(g);
+        r.fval = Function::evaluate(x);
+        for (int d = 0; d < DIM; ++d) { r.coordinates[d] = x[d];}
+    }
     if (atomicAdd(&d_stopFlag, 0) == 0) {
         // We reached MAX_ITER without hitting grad_norm < tol and without ever seeing the flag.
         // That means we “fully looped” and never decremented above. Subtract now:
@@ -830,6 +866,7 @@ __global__ void optimizeKernel(double lower, double upper,
     for (int i = 0; i < DIM; ++i) {
         deviceCoordinates[idx * DIM + i] = x[i];
     }
+    result[idx] = r;
 }// end optimizerKernel
 
 
@@ -1014,6 +1051,10 @@ cudaError_t launchOptimizeKernel(double       lower,
     cudaEventCreate(&stopOpt);
     cudaEventRecord(startOpt);
     
+    Result<DIM>* h_results = new Result<DIM>[N];            // host copy
+    Result<DIM>* d_results = nullptr;
+    cudaMalloc(&d_results, N * sizeof(Result<DIM>));
+
     if (save_trajectories) {
         cudaMalloc(&deviceTrajectory, N*MAX_ITER*DIM*sizeof(double));
         optimizeKernel<Function,DIM,128>
@@ -1024,7 +1065,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceIndices,
                 deviceCoords,
                 deviceTrajectory,
-                N,MAX_ITER,requiredConverged,tolerance,
+                N,MAX_ITER,requiredConverged,tolerance,d_results,
                 /*saveTraj=*/true);
     } else {
         optimizeKernel<Function,DIM,128>
@@ -1035,18 +1076,40 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceIndices,
                 deviceCoords,
                 /*traj=*/nullptr,
-                N,MAX_ITER,requiredConverged, tolerance);
+                N,MAX_ITER,requiredConverged,tolerance,d_results);
     }
     cudaDeviceSynchronize();
     cudaEventRecord(stopOpt);
     cudaEventSynchronize(stopOpt);
-
     cudaEventElapsedTime(&ms_opt, startOpt, stopOpt);
     printf("\nOptimization Kernel execution time = %.3f ms\n", ms_opt);
-
     cudaEventDestroy(startOpt);
     cudaEventDestroy(stopOpt);
 
+    cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
+    int countConverged = 0, surrender = 0, stopped = 0;
+    for (int i = 0; i < N; ++i) {
+        if (h_results[i].status == 1) {
+             countConverged++;
+             printf("Thread %d converged in %d iters: f=%.6f  grad=%.6f  coords=[",
+               i,
+               h_results[i].iter,
+               h_results[i].fval,
+               h_results[i].gradientNorm);
+            for (int d = 0; d < DIM; ++d) {
+                printf(" %.6f", h_results[i].coordinates[d]);
+            }
+            printf(" ]\n");
+        } else if(h_results[i].status == 2) {
+            stopped++;
+            // didn’t converge (or was stopped early)
+            //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
+        } else {
+            surrender++;
+        }
+    }
+    printf("\n%d converged, %d surrendered, %d stopped early\n",countConverged, surrender, stopped);
+    
     // ArgMin & final print
     void*  d_temp_storage = nullptr;
     size_t temp_bytes      = 0;
@@ -1065,6 +1128,25 @@ cudaError_t launchOptimizeKernel(double       lower,
 
     int    globalMinIndex = h_argMin.key;
     double globalMin      = h_argMin.value;
+
+    // copy back the entire array of Result structs:
+    //Result* h_results = new Result[N];
+    //cudaMemcpy(h_results, d_results,N * sizeof(Result),cudaMemcpyDeviceToHost);
+    Result<DIM>* hn_results = new Result<DIM>[N];
+    cudaMemcpy(hn_results,d_results,N * sizeof(Result<DIM>),cudaMemcpyDeviceToHost);
+    // print the “best” thread’s full record
+    Result best = hn_results[globalMinIndex];
+    printf(" Best‐thread summary:\n");
+    printf("   status       = %d\n",      best.status);
+    printf("   fval         = %.6f\n",    best.fval);
+    printf("   gradientNorm = %.6f\n",    best.gradientNorm);
+    printf("   iter         = %d\n",      best.iter);
+    printf("   coords       = [");
+    for (int d = 0; d < DIM; ++d) {
+         printf(" %.7f", best.coordinates[d]);
+    }
+    printf(" ]\n");
+
 
     printf("\nFinal Global Minima: %f  (index %d)\n",
            globalMin, globalMinIndex);
@@ -1252,7 +1334,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 10;
+    const int dim = 2;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
