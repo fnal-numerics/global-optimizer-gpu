@@ -658,7 +658,7 @@ __device__ int d_threadsRemaining;
 template<typename Function, int DIM, unsigned int blockSize>
 __global__ void optimizeKernel(double lower, double upper,
 		const double* __restrict__ pso_array, // pso initialized positions
-		double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged, bool save_trajectories = false) {
+		double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged,double tolerance, bool save_trajectories = false) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
 //__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
@@ -672,7 +672,7 @@ __global__ void optimizeKernel(double lower, double upper,
     //int early_stopping = 0;
     double H[DIM * DIM];
     double g[DIM], x[DIM], x_new[DIM], p[DIM], g_new[DIM], delta_x[DIM], delta_g[DIM];//, new_direction[DIM];
-    double tolerance = 1e-5;
+    //double tolerance = 1e-5;
     // Line Search params
 
     util::initialize_identity_matrix(H, DIM);
@@ -892,7 +892,8 @@ cudaError_t launchOptimizeKernel(double       lower,
                                  int          MAX_ITER,
 				 int 	      PSO_ITER,
 				 int	      requiredConverged,
-                                 std::string  fun_name)
+                                 std::string  fun_name,
+				 double	      tolerance)
 {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
@@ -986,7 +987,7 @@ cudaError_t launchOptimizeKernel(double       lower,
             printf(" ]\n");
 	    ms_pso += ms_iter;
         }// end pso loop
-        printf("total pso time = %.3f\n", ms_pso);
+        printf("total pso time = %.3f\n", ms_pso+ms_init);
 
         cudaEventDestroy(t0);
         cudaEventDestroy(t1);
@@ -1023,7 +1024,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceIndices,
                 deviceCoords,
                 deviceTrajectory,
-                N,MAX_ITER,requiredConverged,
+                N,MAX_ITER,requiredConverged,tolerance,
                 /*saveTraj=*/true);
     } else {
         optimizeKernel<Function,DIM,128>
@@ -1034,7 +1035,7 @@ cudaError_t launchOptimizeKernel(double       lower,
                 deviceIndices,
                 deviceCoords,
                 /*traj=*/nullptr,
-                N,MAX_ITER,requiredConverged);
+                N,MAX_ITER,requiredConverged, tolerance);
     }
     cudaDeviceSynchronize();
     cudaEventRecord(stopOpt);
@@ -1084,22 +1085,22 @@ cudaError_t launchOptimizeKernel(double       lower,
         error = std::abs(fVal - fStar) / std::abs(fStar);
     else
         error = std::abs(fVal);
-    // Append results to a .tsv file in precision 17
+    // Append results to a .tsv file in scientific notation
     {
         std::string filename = std::to_string(DIM) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
         double time_seconds = std::numeric_limits<double>::infinity();
 	if (PSO_ITER > 0) {
 	    time_seconds = (ms_init+ms_pso+ms_opt);
-	    printf("total time = pso + bfgs = total time = %0.2f milliseconds", time_seconds);
+	    printf("total time = pso + bfgs = total time = %0.4f seconds\n", time_seconds);
 	} else {
 	    time_seconds = ms_opt;
-	    printf("bfgs time = total time = %.2f milliseconds", time_seconds);
+	    printf("bfgs time = total time = %.4f seconds\n", time_seconds);
 	}	
 	outfile << fun_name << "\t" << N << "\t" << MAX_ITER << "\t" << PSO_ITER << "\t"
-            << std::fixed << std::setprecision(25) << time_seconds << "\t"
+            << time_seconds << "\t"
             << error << "\t"
-            << globalMin << "\t";
+            << std::scientific << globalMin << "\t";
         for (int i = 0; i < DIM; i++) {
             outfile << hostCoordinates[i];
             if (i < DIM - 1)
@@ -1128,7 +1129,7 @@ cudaError_t launchOptimizeKernel(double       lower,
 }// end launcher
 
 template<typename Function, int DIM>
-void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name) {
+void runOptimizationKernel(double lower, double upper, double* hostResults, int* hostIndices, double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name, double tolerance) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
     /*printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
@@ -1136,7 +1137,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     }
     printf("\n");
     */
-    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name);
+    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
@@ -1167,7 +1168,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
 template<int dim>
 void selectAndRunOptimization(double lower, double upper,
                               double* hostResults, int* hostIndices,
-                              double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged) {
+                              double* hostCoordinates, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, double tolerance) {
     int choice;
     std::cout << "\nSelect function to optimize:\n"
               << " 1. Rosenbrock\n"
@@ -1187,22 +1188,22 @@ void selectAndRunOptimization(double lower, double upper,
     switch(choice) {
         case 1:
             std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged,"rosenbrock");
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged,"rosenbrock", tolerance);
             break;
         case 2:
             std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "rastrigin");
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "rastrigin", tolerance);
             break;
         case 3:
             std::cout << "\n\n\tAckley Function\n" << std::endl;
-            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "ackley");
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "ackley", tolerance);
             break;
         case 4:
             if constexpr (dim != 2) {
                 std::cerr << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "goldstein");
+                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "goldstein", tolerance);
             }
             break;
         case 5:
@@ -1210,7 +1211,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tEggholder Function\n" << std::endl;
-                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "eggholder");
+                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "eggholder", tolerance);
             }
             break;
         case 6:
@@ -1218,7 +1219,7 @@ void selectAndRunOptimization(double lower, double upper,
                 std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "himmelblau");
+                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, hostIndices,hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, "himmelblau", tolerance);
             }
             break;
         case 7:
@@ -1237,17 +1238,18 @@ void selectAndRunOptimization(double lower, double upper,
 #ifndef UNIT_TEST
 int main(int argc, char* argv[]) {
     printf("Production main() running\n");
-    if (argc != 7) {
-	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <pso_iters> <converged> <number_of_optimizations\n";
+    if (argc != 8) {
+	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <pso_iters> <converged> <number_of_optimizations> <tolerance>\n";
         return 1;
     }
     double lower = std::atof(argv[1]);
     double upper = std::atof(argv[2]);   	
-
     int MAX_ITER = std::stoi(argv[3]);
     int PSO_ITERS = std::stoi(argv[4]);
     int requiredConverged = std::stoi(argv[5]);
     int N = std::stoi(argv[6]);
+    double tolerance = std::stod(argv[7]);
+    std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
     const int dim = 5;
@@ -1276,7 +1278,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < N; i++) {
             hostResults[i] = f0;
         }
-        selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged);
+        selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices, hostCoordinates, N, MAX_ITER,PSO_ITERS, requiredConverged, tolerance);
         std::cout << "\nDo you want to optimize another function? (y/n): ";
         std::cin >> cont;
         std::cin.ignore();
