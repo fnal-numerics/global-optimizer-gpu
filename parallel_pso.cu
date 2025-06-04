@@ -1092,10 +1092,10 @@ cudaError_t launchOptimizeKernel(double       lower,
         double time_seconds = std::numeric_limits<double>::infinity();
 	if (PSO_ITER > 0) {
 	    time_seconds = (ms_init+ms_pso+ms_opt);
-	    printf("total time = pso + bfgs = total time = %0.4f seconds\n", time_seconds);
+	    printf("total time = pso + bfgs = total time = %0.4f ms\n", time_seconds);
 	} else {
 	    time_seconds = ms_opt;
-	    printf("bfgs time = total time = %.4f seconds\n", time_seconds);
+	    printf("bfgs time = total time = %.4f ms\n", time_seconds);
 	}	
 	outfile << fun_name << "\t" << N << "\t" << MAX_ITER << "\t" << PSO_ITER << "\t"
             << time_seconds << "\t"
@@ -1104,7 +1104,7 @@ cudaError_t launchOptimizeKernel(double       lower,
         for (int i = 0; i < DIM; i++) {
             outfile << hostCoordinates[i];
             if (i < DIM - 1)
-                outfile << ",";
+                outfile << "\t";
         }
         outfile << "\n";
         outfile.close();
@@ -1252,7 +1252,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 5;
+    const int dim = 10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
