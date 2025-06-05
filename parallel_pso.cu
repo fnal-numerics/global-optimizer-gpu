@@ -195,6 +195,7 @@ __device__ void matrix_multiply_device(const double* A, const double* B, double*
     }
 }
 
+
 // BFGS update with compile-time dimension
 template<int DIM>
 __device__ void bfgs_update(double* H, const double* s, const double* y, double sTy) {
@@ -659,6 +660,7 @@ __global__ void psoIterKernel(
 
 template<int DIM>
 struct Result {
+    int idx;
     int status; // 1 if converged, else if stopped_bc_someone_flipped_the_flag: 2, else 0
     double fval; // function value
     double gradientNorm;
@@ -698,7 +700,7 @@ __global__ void optimizeKernel(double lower, double upper,
         r.coordinates[d] = 0.0;
     }
     r.iter = -1;
-
+    r.idx = idx;
     util::initialize_identity_matrix(H, DIM);
     //unsigned int seed = 135;
     //unsigned int seed = 246; 
@@ -919,6 +921,84 @@ cudaError_t writeTrajectoryData(
     return cudaSuccess;
 }
 
+template<int DIM>
+void dump_data_2_file(Result<DIM>* h_results, std::string fun_name,int N) {
+    std::string filename = fun_name + std::to_string(DIM) + "d_particledata.tsv";
+
+    bool file_exists = std::filesystem::exists(filename);
+    bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
+    std::ofstream outfile(filename, std::ios::app);
+    if (!outfile.is_open()) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return;
+    }
+
+    // if file is new or empty, let us write the header
+    if (file_empty) {
+        outfile << "fun\tidx\tstatus\titer\tfval\tnorm";
+        for (int i = 0; i < DIM; i++)
+            outfile << "\tcoord_" << i;
+        outfile << std::endl;
+    }// end if file is empty
+
+    std::string tab = "\t";
+    int countConverged = 0, surrender = 0, stopped = 0;
+    for (int i = 0; i < N; ++i) {
+        outfile << fun_name << tab << i << tab; 
+        if (h_results[i].status == 1) {
+            countConverged++;
+            outfile << 1 << tab;
+        } else if(h_results[i].status == 2) { // particle was stopped early
+            stopped++;
+            outfile << i << tab << 2 << tab;
+            //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
+        } else {
+            surrender++;
+            outfile << i << tab << 0 << tab;
+        }
+        outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+        for(int d = 0; d < DIM; ++d) {
+            outfile << "\t"<< h_results[i].coordinates[d];
+        }
+        outfile << tab;
+    }
+    printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
+}
+
+template<typename Function, int DIM>
+void launch_pso() {
+        // allocate PSO buffers on device
+        double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal;
+        cudaMalloc(&dX,        N*DIM*sizeof(double));
+        cudaMalloc(&dV,        N*DIM*sizeof(double));
+        cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
+        cudaMalloc(&dPBestVal, N   *sizeof(double));
+        cudaMalloc(&dGBestX,   DIM *sizeof(double));
+        cudaMalloc(&dGBestVal, sizeof(double));
+        int zero = 0;
+        cudaMemcpyToSymbol(d_stopFlag, &zero, sizeof(int));
+        cudaMemcpyToSymbol(d_threadsRemaining, &N, sizeof(int));
+        cudaMemcpyToSymbol(d_convergedCount,   &zero, sizeof(int));
+        // set seed to infinity
+        {
+            double inf = std::numeric_limits<double>::infinity();
+            cudaMemcpy(dGBestVal, &inf, sizeof(inf), cudaMemcpyHostToDevice);
+        }
+
+        dim3 psoBlock(256);
+        dim3 psoGrid((N + psoBlock.x - 1) / psoBlock.x);
+
+        // host-side buffers for printing
+        double hostGBestVal;
+        std::vector<double> hostGBestX(DIM);
+
+        // PSO‐init Kernel
+        cudaEvent_t t0, t1;
+        cudaEventCreate(&t0);
+        cudaEventCreate(&t1);
+
+}
+
 template<typename Function, int DIM>
 cudaError_t launchOptimizeKernel(double       lower,
                                  double       upper,
@@ -1087,28 +1167,7 @@ cudaError_t launchOptimizeKernel(double       lower,
     cudaEventDestroy(stopOpt);
 
     cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
-    int countConverged = 0, surrender = 0, stopped = 0;
-    for (int i = 0; i < N; ++i) {
-        if (h_results[i].status == 1) {
-             countConverged++;
-             printf("Thread %d converged in %d iters: f=%.6f  grad=%.6f  coords=[",
-               i,
-               h_results[i].iter,
-               h_results[i].fval,
-               h_results[i].gradientNorm);
-            for (int d = 0; d < DIM; ++d) {
-                printf(" %.6f", h_results[i].coordinates[d]);
-            }
-            printf(" ]\n");
-        } else if(h_results[i].status == 2) {
-            stopped++;
-            // didn’t converge (or was stopped early)
-            //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
-        } else {
-            surrender++;
-        }
-    }
-    printf("\n%d converged, %d surrendered, %d stopped early\n",countConverged, surrender, stopped);
+    dump_data_2_file(h_results, fun_name, N);
     
     // ArgMin & final print
     void*  d_temp_storage = nullptr;
@@ -1137,16 +1196,16 @@ cudaError_t launchOptimizeKernel(double       lower,
     // print the “best” thread’s full record
     Result best = hn_results[globalMinIndex];
     printf(" Best‐thread summary:\n");
-    printf("   status       = %d\n",      best.status);
-    printf("   fval         = %.6f\n",    best.fval);
-    printf("   gradientNorm = %.6f\n",    best.gradientNorm);
-    printf("   iter         = %d\n",      best.iter);
+    printf("   idx          = %d\n", best.idx);
+    printf("   status       = %d\n", best.status);
+    printf("   fval         = %.6f\n",best.fval);
+    printf("   gradientNorm = %.6f\n",best.gradientNorm);
+    printf("   iter         = %d\n",best.iter);
     printf("   coords       = [");
     for (int d = 0; d < DIM; ++d) {
          printf(" %.7f", best.coordinates[d]);
     }
     printf(" ]\n");
-
 
     printf("\nFinal Global Minima: %f  (index %d)\n",
            globalMin, globalMinIndex);
