@@ -950,21 +950,21 @@ void dump_data_2_file(Result<DIM>* h_results, std::string fun_name,int N) {
             outfile << 1 << tab;
         } else if(h_results[i].status == 2) { // particle was stopped early
             stopped++;
-            outfile << i << tab << 2 << tab;
+            outfile << 2 << tab;
             //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
         } else {
             surrender++;
-            outfile << i << tab << 0 << tab;
+            outfile << 0 << tab;
         }
         outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
         for(int d = 0; d < DIM; ++d) {
             outfile << "\t"<< h_results[i].coordinates[d];
         }
-        outfile << tab;
+        outfile << std::endl;
     }
     printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
 }
-
+/*
 template<typename Function, int DIM>
 void launch_pso() {
         // allocate PSO buffers on device
@@ -998,6 +998,7 @@ void launch_pso() {
         cudaEventCreate(&t1);
 
 }
+*/
 
 template<typename Function, int DIM>
 cudaError_t launchOptimizeKernel(double       lower,
