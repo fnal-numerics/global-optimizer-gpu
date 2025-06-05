@@ -675,7 +675,7 @@ __device__ int d_threadsRemaining;
 template<typename Function, int DIM, unsigned int blockSize>
 __global__ void optimizeKernel(double lower, double upper,
 		const double* __restrict__ pso_array, // pso initialized positions
-		double* deviceResults, int* deviceIndices, double* deviceCoordinates, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged,double tolerance, Result<DIM>* result, bool save_trajectories = false) {
+		double* deviceResults, double* deviceTrajectory, int N, int MAX_ITER, int requiredConverged,double tolerance, Result<DIM>* result, bool save_trajectories = false) {
 //template<typename Function, int DIM, unsigned int blockSize> 
 //__global__ void optimizeKernel(double* devicePoints,double* deviceResults, int N) {
 //__global__ void optimizeKernel(double lower, double upper, double* deviceResults, int* deviceIndices, double* deviceCoordinates, int N, int MAX_ITER) {
@@ -849,25 +849,15 @@ __global__ void optimizeKernel(double lower, double upper,
 
 	//for(int i=0; i<DIM; ++i) {x[i] = x_new[i];}
     }// end outer for
-    if(MAX_ITER == iter) {
+    if(MAX_ITER == iter) { // if we broek out because we hit the max numberof iterations, then status == 0
         r.status = 0; // surrender
         r.iter = iter;
         r.gradientNorm = util::calculate_gradient_norm<DIM>(g);
         r.fval = Function::evaluate(x);
         for (int d = 0; d < DIM; ++d) { r.coordinates[d] = x[d];}
     }
-    if (atomicAdd(&d_stopFlag, 0) == 0) {
-        // We reached MAX_ITER without hitting grad_norm < tol and without ever seeing the flag.
-        // That means we “fully looped” and never decremented above. Subtract now:
-        int oldCount2 = atomicSub(&d_threadsRemaining, 1);
-    }
-    bestVal = Function::evaluate(x);//rosenbrock_device(x, DIM);
     //printf("\nmax iterations reached, predicted minima = %f\n", minima);
-    deviceResults[idx] = bestVal;
-    deviceIndices[idx] = idx;
-    for (int i = 0; i < DIM; ++i) {
-        deviceCoordinates[idx * DIM + i] = x[i];
-    }
+    deviceResults[idx] = Function::evaluate(x);
     result[idx] = r;
 }// end optimizerKernel
 
@@ -883,7 +873,6 @@ bool askUser2saveTrajectories() {
 void createOutputDirs(const std::string &path) {
     std::filesystem::create_directories(path);
 }
-
 
 cudaError_t writeTrajectoryData(
     double* hostTrajectory,
@@ -964,9 +953,10 @@ void dump_data_2_file(Result<DIM>* h_results, std::string fun_name,int N) {
     }
     printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
 }
-/*
+
+
 template<typename Function, int DIM>
-void launch_pso() {
+void launch_pso(double* dPBestX,int PSO_ITER, int N, double lower, double upper, float& ms_init, float& ms_pso) {
         // allocate PSO buffers on device
         double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal;
         cudaMalloc(&dX,        N*DIM*sizeof(double));
@@ -996,65 +986,6 @@ void launch_pso() {
         cudaEvent_t t0, t1;
         cudaEventCreate(&t0);
         cudaEventCreate(&t1);
-
-}
-*/
-
-template<typename Function, int DIM>
-cudaError_t launchOptimizeKernel(double       lower,
-                                 double       upper,
-                                 double*      hostResults,
-                                 int*         hostIndices,
-                                 double*      hostCoordinates,
-                                 int          N,
-                                 int          MAX_ITER,
-				 int 	      PSO_ITER,
-				 int	      requiredConverged,
-                                 std::string  fun_name,
-				 double	      tolerance)
-{
-    int blockSize, minGridSize;
-    cudaOccupancyMaxPotentialBlockSize(
-        &minGridSize, &blockSize,
-        optimizeKernel<Function,DIM,128>,
-        0, N);
-    printf("Recommended block size: %d\n", blockSize);
-
-    bool save_trajectories = askUser2saveTrajectories();
-    double* deviceTrajectory = nullptr;
-    double *dX=nullptr, *dV=nullptr, *dPBestVal=nullptr, *dGBestX=nullptr, *dGBestVal=nullptr, *dPBestX=nullptr;
-    float ms_init, ms_pso, ms_opt; 
-    if(PSO_ITER > 0) {
-        // allocate PSO buffers on device
-        double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal;
-        cudaMalloc(&dX,        N*DIM*sizeof(double));
-        cudaMalloc(&dV,        N*DIM*sizeof(double));
-        cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
-        cudaMalloc(&dPBestVal, N   *sizeof(double));
-        cudaMalloc(&dGBestX,   DIM *sizeof(double));
-        cudaMalloc(&dGBestVal, sizeof(double));
-        int zero = 0;
-        cudaMemcpyToSymbol(d_stopFlag, &zero, sizeof(int)); 
-        cudaMemcpyToSymbol(d_threadsRemaining, &N, sizeof(int));
-        cudaMemcpyToSymbol(d_convergedCount,   &zero, sizeof(int));
-        // set seed to infinity
-        {
-            double inf = std::numeric_limits<double>::infinity();
-            cudaMemcpy(dGBestVal, &inf, sizeof(inf), cudaMemcpyHostToDevice);
-    	}
-
-	dim3 psoBlock(256);
-        dim3 psoGrid((N + psoBlock.x - 1) / psoBlock.x);
-
-        // host-side buffers for printing
-        double hostGBestVal;
-        std::vector<double> hostGBestX(DIM);
-
-        // PSO‐init Kernel
-        cudaEvent_t t0, t1;
-        cudaEventCreate(&t0);
-        cudaEventCreate(&t1);
-
         cudaEventRecord(t0);
         psoInitKernel<Function,DIM><<<psoGrid,psoBlock>>>(
              Function(), lower, upper,
@@ -1088,8 +1019,8 @@ cudaError_t launchOptimizeKernel(double       lower,
                 dX, dV,
                 dPBestX, dPBestVal,
                 dGBestX, dGBestVal,
-                /*traj=*/nullptr,
-                /*saveTraj=*/false,
+                nullptr,// traj
+                false,//saveTraj
                 N, iter, 1234567);
             cudaDeviceSynchronize();
             cudaEventRecord(t1);
@@ -1103,14 +1034,49 @@ cudaError_t launchOptimizeKernel(double       lower,
             printf("PSO‑Iter %2d execution time = %.3f ms   gBestVal = %.6e at [",iter, ms_iter, hostGBestVal);
             for(int d=0; d<DIM; ++d) printf(" %.4f", hostGBestX[d]);
             printf(" ]\n");
-	    ms_pso += ms_iter;
+            ms_pso += ms_iter;
         }// end pso loop
         printf("total pso time = %.3f\n", ms_pso+ms_init);
 
         cudaEventDestroy(t0);
         cudaEventDestroy(t1);
-    }// end if pso_iter > 0
+    cudaFree(dX);
+    cudaFree(dV);
+    //cudaFree(dPBestX);
+    cudaFree(dPBestVal);
+    cudaFree(dGBestX);
+    cudaFree(dGBestVal);
+}
 
+
+template<typename Function, int DIM>
+cudaError_t Zeus(double       lower,
+                                 double       upper,
+                                 double*      hostResults,
+                                 int*         hostIndices,
+                                 double*      hostCoordinates,
+                                 int          N,
+                                 int          MAX_ITER,
+				 int 	      PSO_ITER,
+				 int	      requiredConverged,
+                                 std::string  fun_name,
+				 double	      tolerance)
+{
+    int blockSize, minGridSize;
+    cudaOccupancyMaxPotentialBlockSize(
+        &minGridSize, &blockSize,
+        optimizeKernel<Function,DIM,128>,
+        0, N);
+    printf("Recommended block size: %d\n", blockSize);
+
+    bool save_trajectories = askUser2saveTrajectories();
+    double* deviceTrajectory = nullptr;
+    double *dPBestX=nullptr;
+    float ms_init = 0.0f, ms_pso = 0.0f, ms_opt = 0.0f; 
+    if(PSO_ITER > 0) {
+        launch_pso<Function, DIM>(dPBestX,PSO_ITER, N,lower, upper, ms_init,ms_pso);
+        printf("pso init: %.2f main loop: %.2f", ms_init, ms_pso); 
+    }// end if pso_iter > 0 
 
     // prepare optimizer buffers & copy hostResults→device ––
     double* deviceResults;
@@ -1143,8 +1109,6 @@ cudaError_t launchOptimizeKernel(double       lower,
                 lower, upper,
                 dPBestX,
                 deviceResults,
-                deviceIndices,
-                deviceCoords,
                 deviceTrajectory,
                 N,MAX_ITER,requiredConverged,tolerance,d_results,
                 /*saveTraj=*/true);
@@ -1154,8 +1118,6 @@ cudaError_t launchOptimizeKernel(double       lower,
                 lower, upper,
                 dPBestX,
                 deviceResults,
-                deviceIndices,
-                deviceCoords,
                 /*traj=*/nullptr,
                 N,MAX_ITER,requiredConverged,tolerance,d_results);
     }
@@ -1196,7 +1158,7 @@ cudaError_t launchOptimizeKernel(double       lower,
     cudaMemcpy(hn_results,d_results,N * sizeof(Result<DIM>),cudaMemcpyDeviceToHost);
     // print the “best” thread’s full record
     Result best = hn_results[globalMinIndex];
-    printf(" Best‐thread summary:\n");
+    printf("Global best summary:\n");
     printf("   idx          = %d\n", best.idx);
     printf("   status       = %d\n", best.status);
     printf("   fval         = %.6f\n",best.fval);
@@ -1207,20 +1169,10 @@ cudaError_t launchOptimizeKernel(double       lower,
          printf(" %.7f", best.coordinates[d]);
     }
     printf(" ]\n");
-
-    printf("\nFinal Global Minima: %f  (index %d)\n",
-           globalMin, globalMinIndex);
-
-    cudaMemcpy(hostCoordinates,
-               deviceCoords + size_t(globalMinIndex)*DIM,
-               DIM*sizeof(double),
-               cudaMemcpyDeviceToHost);
-
-    printf("Coordinates: [");
-    for(int d=0; d<DIM; ++d) printf(" %.7f", hostCoordinates[d]);
-    printf(" ]\n");
+    
     double error;
     double fStar = 0.0;                         // f(x*) for high dim functions
+    
     double fVal = globalMin;
 
     if (std::abs(fStar) > 0.0)
@@ -1253,17 +1205,10 @@ cudaError_t launchOptimizeKernel(double       lower,
         printf("results are saved to %s", filename.c_str());
     }
     if(PSO_ITER > 0) {
-    cudaFree(dX);
-    cudaFree(dV);
-    cudaFree(dPBestX);
-    cudaFree(dPBestVal);
-    cudaFree(dGBestX);
-    cudaFree(dGBestVal);
+        cudaFree(dPBestX);
     }
 
     cudaFree(deviceResults);
-    cudaFree(deviceIndices);
-    cudaFree(deviceCoords);
     cudaFree(deviceArgMin);
     cudaFree(d_temp_storage);
 
@@ -1279,7 +1224,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int*
     }
     printf("\n");
     */
-    cudaError_t error = launchOptimizeKernel<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance);
+    cudaError_t error = Zeus<Function, DIM>(lower, upper, hostResults,hostIndices, hostCoordinates, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance);
     if (error != cudaSuccess) {
         printf("CUDA error: %s", cudaGetErrorString(error));
     } else {
