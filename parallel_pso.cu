@@ -135,6 +135,17 @@ __device__ double calculate_gradient_norm(const double* g) {
     return sqrt(grad_norm);
 }
 
+template<int DIM>
+__device__ void compute_search_direction(double* p,double* H,double* g) {
+    for (int i = 0; i < DIM; i++) {
+        double sum=0.0;
+        for (int j = 0; j < DIM; j++) {
+           sum += H[i * DIM + j] * g[j]; // i * dim + j since H is flattened arr[]
+        }    
+    p[i] = -sum;
+    }
+}
+
 // wrap kernel definitions extern "C" block so that their symbols are exported with C linkage
 extern "C" {
 __device__ __noinline__ void vector_add(const double* a, const double* b, double* result, int size) {
@@ -749,22 +760,8 @@ __global__ void optimizeKernel(double lower, double upper,
             
         }
 	num_steps++;
-	//printf("idx = %d", idx);
-	//printf("x[0] = %f", x[0]);
-	//printf("\n\n\nit#%d",iter);
-	//Function::gradient(x, g, DIM);
-	//rosenbrock_gradient_device(x, g, DIM);
-	//util::calculateGradientUsingAD<Function, DIM>(x, g);
-        
-	//d0 = 0.0;
-        // compute the search direction p = -H * g
-        for (int i = 0; i < DIM; i++) {
-            double sum=0.0;
-	    for (int j = 0; j < DIM; j++) {
-                sum += H[i * DIM + j] * g[j]; // i * dim + j since H is flattened arr[]
-            }    
-	    p[i] = -sum;
-        }
+
+        util::compute_search_direction<DIM>(p, H, g); //p = -H * g        
 
 	// use the alpha obtained from the line search
 	double alpha = util::line_search<Function,DIM>(bestVal, x, p, g);
@@ -772,13 +769,11 @@ __global__ void optimizeKernel(double lower, double upper,
             printf("Alpha is zero, no movement in iteration=%d\n", iter);
             alpha = 1e-3; 
         }
-        //printf("alpha before updat at it%de: %f", iter, alpha);
 
 	// update current point x by taking a step size of alpha in the direction p
 	for (int i = 0; i < DIM; ++i) {
             x_new[i] = x[i] + alpha * p[i];
 	    delta_x[i] = x_new[i] - x[i];
-	    //printf("\nnewx[%d]: %f",i,x_new[i]);
 	}
 
         double fnew = Function::evaluate(x_new);	
@@ -811,7 +806,6 @@ __global__ void optimizeKernel(double lower, double upper,
             int oldCount = atomicAdd(&d_convergedCount, 1);
             int newCount = oldCount + 1;
             double fcurr = Function::evaluate(x);
-            // now newCount == (number of threads that have now reported convergence).
             //printf("\nconverged for %d at iter=%d); f = %.6f;",idx, iter,fcurr);
             //for (int d = 0; d < DIM; ++d) { printf(" % .6f", x[d]);}
             //printf(" ]\n");
@@ -822,8 +816,8 @@ __global__ void optimizeKernel(double lower, double upper,
             for (int d = 0; d < DIM; ++d) {
                 r.coordinates[d] = x[d];
             }	    
-	    // if we just hit the threshold K set by the user, the VERY FIRST thread to do so
-            // sets d_stopFlag=1 so everyone else exits on their next check.
+	    // if we just hit the threshold set by the user, the VERY FIRST thread to do so
+            // sets d_stopFlag=1 so everyone else exits on their next check
             if (newCount == requiredConverged) {
                 // flip the global stop flag
                 atomicExch(&d_stopFlag, 1);
@@ -835,8 +829,8 @@ __global__ void optimizeKernel(double lower, double upper,
                   iter,fcurr
                 );
             }
-            // in _any_ case (whether we were the kth or not), 
-            // we are individually “done,” so break
+            // in _any_ case, whether we were the last to converge or not, 
+            // we are individually “done” so break
             break;
         }
 
