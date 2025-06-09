@@ -1093,7 +1093,7 @@ Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results
                cudaMemcpyDeviceToHost);
 
     int    globalMinIndex = h_argMin.key;
-    double globalMin      = h_argMin.value;
+    //double globalMin      = h_argMin.value;
 
     // copy back the entire array of Result structs:
     //Result* h_results = new Result[N];
@@ -1195,7 +1195,7 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
 }
 
 template<typename Function, int DIM>
-cudaError_t Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance)
+Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance)
 {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
@@ -1220,12 +1220,17 @@ cudaError_t Zeus(const double lower,const double upper, double* hostResults,int 
     double error = globalMin;
     append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,MAX_ITER, PSO_ITER,error,globalMin, best.coordinates);
     
-    if(PSO_ITER > 0) { // optimzation routine is finished by now, so we can free that array on the device
+    if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
         cudaFree(dPBestX);
     }
-
-    return cudaSuccess;
-}// end launcher
+    cudaError_t cuda_error  = cudaGetLastError();
+    if (cuda_error != cudaSuccess) { 
+        printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
+    } else {
+        printf("\nSuccess!! No Error!\n");
+    }
+    return best;
+}// end Zeus
 
 template<typename Function, int DIM>
 void runOptimizationKernel(double lower, double upper, double* hostResults, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name, double tolerance) {
@@ -1236,12 +1241,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int 
     }
     printf("\n");
     */
-    cudaError_t error = Zeus<Function, DIM>(lower, upper, hostResults, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance);
-    if (error != cudaSuccess) {
-        printf("CUDA error: %s", cudaGetErrorString(error));
-    } else {
-        printf("\nSuccess!! No Error!\n");
-    }
+    Result best = Zeus<Function, DIM>(lower, upper, hostResults, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance);
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
