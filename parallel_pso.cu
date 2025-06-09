@@ -1072,6 +1072,53 @@ void launch_pso(double* dPBestX,const int PSO_ITER,const int N,const double lowe
     cudaFree(dGBestVal);
 }
 
+template<int DIM>
+Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results) {
+    // ArgMin & final print
+    cub::KeyValuePair<int,double>* deviceArgMin;
+    cudaMalloc(&deviceArgMin,     sizeof(*deviceArgMin));
+    void*  d_temp_storage = nullptr;
+    size_t temp_bytes      = 0;
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+    cudaMalloc(&d_temp_storage, temp_bytes);
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+
+    cub::KeyValuePair<int,double> h_argMin;
+    cudaMemcpy(&h_argMin, deviceArgMin,
+               sizeof(h_argMin),
+               cudaMemcpyDeviceToHost);
+
+    int    globalMinIndex = h_argMin.key;
+    double globalMin      = h_argMin.value;
+
+    // copy back the entire array of Result structs:
+    //Result* h_results = new Result[N];
+    //cudaMemcpy(h_results, d_results,N * sizeof(Result),cudaMemcpyDeviceToHost);
+    //Result<DIM>* hn_results = new Result<DIM>[N];
+    //cudaMemcpy(h_results,d_results,N * sizeof(Result<DIM>),cudaMemcpyDeviceToHost);
+    // print the “best” thread’s full record
+    Result best = h_results[globalMinIndex];
+    printf("Global best summary:\n");
+    printf("   idx          = %d\n", best.idx);
+    printf("   status       = %d\n", best.status);
+    printf("   fval         = %.6f\n",best.fval);
+    printf("   gradientNorm = %.6f\n",best.gradientNorm);
+    printf("   iter         = %d\n",best.iter);
+    printf("   coords       = [");
+    for (int d = 0; d < DIM; ++d) {
+         printf(" %.7f", best.coordinates[d]);
+    }
+    printf(" ]\n");
+
+    cudaFree(deviceResults);
+    cudaFree(deviceArgMin);
+    cudaFree(d_temp_storage);
+    return best;
+}
 
 template<typename Function, int DIM>
 Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, const double lower,double* dPBestX,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, double& globalMin, float& ms_opt) {
@@ -1080,13 +1127,11 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
         &minGridSize, &blockSize,
         optimizeKernel<Function,DIM,128>,
         0, N);
-    printf("Recommended block size: %d\n", blockSize);
+    printf("\nRecommended block size: %d\n", blockSize);
     
     // prepare optimizer buffers & copy hostResults --> device
     double* deviceResults;
-    cub::KeyValuePair<int,double>* deviceArgMin;
     cudaMalloc(&deviceResults,    N * sizeof(double));
-    cudaMalloc(&deviceArgMin,     sizeof(*deviceArgMin));
     cudaMemcpy(deviceResults, hostResults, N*sizeof(double), cudaMemcpyHostToDevice);
 
     dim3 optBlock(blockSize);
@@ -1144,47 +1189,8 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
     }
     printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
 
-    // ArgMin & final print
-    void*  d_temp_storage = nullptr;
-    size_t temp_bytes      = 0;
-    cub::DeviceReduce::ArgMin(
-        d_temp_storage, temp_bytes,
-        deviceResults, deviceArgMin, N);
-    cudaMalloc(&d_temp_storage, temp_bytes);
-    cub::DeviceReduce::ArgMin(
-        d_temp_storage, temp_bytes,
-        deviceResults, deviceArgMin, N);
-
-    cub::KeyValuePair<int,double> h_argMin;
-    cudaMemcpy(&h_argMin, deviceArgMin,
-               sizeof(h_argMin),
-               cudaMemcpyDeviceToHost);
-
-    int    globalMinIndex = h_argMin.key;
-    globalMin      = h_argMin.value;
-
-    // copy back the entire array of Result structs:
-    //Result* h_results = new Result[N];
-    //cudaMemcpy(h_results, d_results,N * sizeof(Result),cudaMemcpyDeviceToHost);
-    //Result<DIM>* hn_results = new Result<DIM>[N];
-    cudaMemcpy(h_results,d_results,N * sizeof(Result<DIM>),cudaMemcpyDeviceToHost);
-    // print the “best” thread’s full record
-    Result best = h_results[globalMinIndex];
-    printf("Global best summary:\n");
-    printf("   idx          = %d\n", best.idx);
-    printf("   status       = %d\n", best.status);
-    printf("   fval         = %.6f\n",best.fval);
-    printf("   gradientNorm = %.6f\n",best.gradientNorm);
-    printf("   iter         = %d\n",best.iter);
-    printf("   coords       = [");
-    for (int d = 0; d < DIM; ++d) {
-         printf(" %.7f", best.coordinates[d]);
-    }
-    printf(" ]\n");
-
-    cudaFree(deviceResults);
-    cudaFree(deviceArgMin);
-    cudaFree(d_temp_storage);
+    Result best = launch_reduction<DIM>(N, deviceResults, h_results);
+    
     return best;
 }
 
@@ -1343,7 +1349,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 10;
+    const int dim = 2;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
