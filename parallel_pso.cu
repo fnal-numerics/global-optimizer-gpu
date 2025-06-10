@@ -718,6 +718,8 @@ __global__ void optimizeKernel(const double lower,const double upper,
         #pragma unroll
         for (int d = 0; d < DIM; ++d) {
             x[d] = pso_array[idx*DIM + d];
+            if(idx == 0)
+                printf("x[%d]=%0.7f\n", d, x[d]);
         }
     } else {
         unsigned int seed = 456;
@@ -893,8 +895,8 @@ cudaError_t writeTrajectoryData(
 
 // make it write to std::cout + dump to file
 template<int DIM>
-void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N) {
-    std::string filename = fun_name + std::to_string(DIM) + "d_particledata.tsv";
+void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER) {
+    std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
 
     bool file_exists = std::filesystem::exists(filename);
     bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
@@ -933,12 +935,13 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
         }
         outfile << std::endl;
     }
-    printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
+    std::cout << "\ndumped data 2 "<< filename << "\n"<<countConverged <<" converged, "<<stopped << " stopped early, "<<surrender<<" surrendered\n"; 
+    //printf("\ndumped data 2 %s\n%d converged, %d stopped early, %d surrendered\n",filename.c_str(),countConverged, stopped, surrender);
 }
 
 
-void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates) {
-        std::string filename = std::to_string(dim) + "d_results.tsv";
+void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm) {
+        std::string filename = "zeus_" + std::to_string(dim) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
         
         bool file_exists = std::filesystem::exists(filename);
@@ -951,7 +954,7 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
 
         // if file is new or empty, let us write the header
         if (file_empty) {
-            outfile << "fun\tidx\tstatus\titer\tfval\t";
+            outfile << "fun\tN\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm\t";
             for (int i = 0; i < dim; i++)
                 outfile << "\tcoord_" << i;
             outfile << std::endl;
@@ -965,10 +968,9 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
             time_seconds = ms_opt;
             printf("bfgs time = total time = %.4f ms\n", time_seconds);
         }
-        outfile << fun_name << "\t" << N << "\t" << max_iter << "\t" << pso_iter << "\t"
+        outfile << fun_name << "\t" << N << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
             << time_seconds << "\t"
-            << error << "\t"
-            << std::scientific << globalMin << "\t";
+            << std::scientific << error << "\t" << globalMin << "\t" << norm <<"\t" ;
         for (int i = 0; i < dim; i++) {
             outfile << hostCoordinates[i];
             if (i < dim - 1)
@@ -980,9 +982,9 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
 }// end append_results_2_tsv
 
 template<typename Function, int DIM>
-void launch_pso(double* dPBestX,const int PSO_ITER,const int N,const double lower,const double upper, float& ms_init, float& ms_pso) {
+double* launch_pso(const int PSO_ITER,const int N,const double lower,const double upper, float& ms_init, float& ms_pso) {
         // allocate PSO buffers on device
-        double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal;
+        double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal, *dPBestX;
         cudaMalloc(&dX,        N*DIM*sizeof(double));
         cudaMalloc(&dV,        N*DIM*sizeof(double));
         cudaMalloc(&dPBestX,   N*DIM*sizeof(double));
@@ -1061,15 +1063,21 @@ void launch_pso(double* dPBestX,const int PSO_ITER,const int N,const double lowe
             ms_pso += ms_iter;
         }// end pso loop
         printf("total pso time = %.3f\n", ms_pso+ms_init);
-
-        cudaEventDestroy(t0);
-        cudaEventDestroy(t1);
+        /*double *hPBestX = new double[DIM]; 
+        cudaMemcpy(hPBestX,
+           dPBestX,
+           DIM * sizeof(double),
+           cudaMemcpyDeviceToHost); 
+        */
+    cudaEventDestroy(t0);
+    cudaEventDestroy(t1);
     cudaFree(dX);
     cudaFree(dV);
     //cudaFree(dPBestX);
     cudaFree(dPBestVal);
     cudaFree(dGBestX);
     cudaFree(dGBestVal);
+    return dPBestX;
 }
 
 template<int DIM>
@@ -1121,7 +1129,7 @@ Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results
 }
 
 template<typename Function, int DIM>
-Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, const double lower,double* dPBestX,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, double& globalMin, float& ms_opt) {
+Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name) {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
         &minGridSize, &blockSize,
@@ -1146,13 +1154,17 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
     Result<DIM>* h_results = new Result<DIM>[N];            // host copy
     Result<DIM>* d_results = nullptr;
     cudaMalloc(&d_results, N * sizeof(Result<DIM>));
-
+    /*
+    for(int i=0;i<DIM;i++){ 
+        std::cout << hPBestX[i] << " ";
+    }*/
+    std::cout << std::endl;
     if (save_trajectories) {
         cudaMalloc(&deviceTrajectory, N*MAX_ITER*DIM*sizeof(double));
         optimizeKernel<Function,DIM,128>
             <<<optGrid,optBlock>>>(
                 lower, upper,
-                dPBestX,
+                pso_results_device,
                 deviceResults,
                 deviceTrajectory,
                 N,MAX_ITER,requiredConverged,tolerance,d_results,
@@ -1161,7 +1173,7 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
         optimizeKernel<Function,DIM,128>
             <<<optGrid,optBlock>>>(
                 lower, upper,
-                dPBestX,
+                pso_results_device,
                 deviceResults,
                 /*traj=*/nullptr,
                 N,MAX_ITER,requiredConverged,tolerance,d_results);
@@ -1176,10 +1188,10 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
 
     cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
 
-    //dump_data_2_file(h_results, fun_name, N);
-    int countConverged = 0, surrender = 0, stopped = 0;
+    dump_data_2_file(h_results, fun_name, N, pso_iter);
+    /*int countConverged = 0, surrender = 0, stopped = 0;
     for (int i = 0; i < N; ++i) {
-        if (h_results[i].status == 1) {
+        if (h_results[i].status == 1) { 
             countConverged++;
         } else if(h_results[i].status == 2) { // particle was stopped early
             stopped++;
@@ -1188,11 +1200,26 @@ Result<DIM> launch_bfgs(const int N, const int MAX_ITER, const double upper, con
         }
     }
     printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
-
+    */
     Result best = launch_reduction<DIM>(N, deviceResults, h_results);
     
     return best;
 }
+
+double calculate_euclidean_error(const std::string fun_name, const double* coordinates, const int dim) {
+   double sum_sq = 0.0;
+   if(fun_name == "rosenbrock") {
+      for(int i=0;i<dim;i++) {
+         double diff = coordinates[i] - 1.0;
+         sum_sq += diff * diff;
+      }
+   } else if(fun_name == "rastrigin" || fun_name == "ackley") { // both rastrigin and ackley have the same coordinates for the global minimum
+      for (int i = 0; i < dim; ++i) {
+         sum_sq += coordinates[i] * coordinates[i];
+      }
+   }
+   return std::sqrt(sum_sq);
+}// end calculate_euclidean_error
 
 template<typename Function, int DIM>
 Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance)
@@ -1206,23 +1233,23 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
 
     bool save_trajectories = askUser2saveTrajectories();
     double* deviceTrajectory = nullptr;
-    double *dPBestX=nullptr;
+    double* pso_results_device=nullptr;
     float ms_init = 0.0f, ms_pso = 0.0f; 
     if(PSO_ITER > 0) {
-        launch_pso<Function, DIM>(dPBestX,PSO_ITER, N,lower, upper, ms_init,ms_pso);
+        pso_results_device = launch_pso<Function, DIM>(PSO_ITER, N,lower, upper, ms_init,ms_pso);
         printf("pso init: %.2f main loop: %.2f", ms_init, ms_pso); 
     }// end if pso_iter > 0 
-
+    if(!pso_results_device) 
+       std::cout <<"still null" << std::endl;
     float ms_opt = 0.0f;
-    double globalMin = std::numeric_limits<double>::infinity();
-    Result best = launch_bfgs<Function, DIM>(N, MAX_ITER,upper, lower, dPBestX, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories,globalMin, ms_opt);
-    
-    double error = globalMin;
-    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,MAX_ITER, PSO_ITER,error,globalMin, best.coordinates);
-    
+    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name);
     if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
-        cudaFree(dPBestX);
-    }
+         cudaFree(pso_results_device);
+    } 
+
+    double error = calculate_euclidean_error(fun_name, best.coordinates, DIM);
+    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm);
+     
     cudaError_t cuda_error  = cudaGetLastError();
     if (cuda_error != cudaSuccess) { 
         printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
@@ -1349,7 +1376,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 2;
+    const int dim = 10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
