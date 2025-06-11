@@ -25,6 +25,9 @@
 //using fastPRNG;
 //fastXS64 fastR;
 
+#include "parallel_pso.cuh"
+#include "dual_numbers.cuh"
+/*
 namespace dual {
 
 class DualNumber {
@@ -100,7 +103,7 @@ __host__ __device__ T pow(const T& base, double exponent) {
 }
 
 } // end of dual
-
+*/
 
 
 namespace util {
@@ -252,7 +255,7 @@ __device__ double directional_derivative(const double *grad, const double *p, in
     return d;
 }
 
-
+/*
 template<int DIM>
 __device__
 dual::DualNumber rosenbrock(const dual::DualNumber* x) {
@@ -297,15 +300,16 @@ double rastrigin(const double* x) {
         val += xi*xi - A*::cosf(2.0f*M_PI*xi);
     }
     return val;
-    /*
+    
     	double sum = 10 * DIM;
     for (int i = 0; i < DIM; ++i) {
         sum += x[i] * x[i] - 10 * cos(2 * M_PI * x[i]);
     }
     return sum;
-*/}
+*/
 
 
+/*
 template<int DIM>
 struct Rosenbrock {
     __device__ static dual::DualNumber evaluate(const dual::DualNumber* x) {
@@ -328,12 +332,13 @@ struct Rastrigin {
         return rastrigin<DIM>(x);
     }
 };
+*/
 
 // Ackley Function (general d-dimensions)
 //   f(x) = -20 exp\Bigl(-0.2\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2}\Bigr)
 //          - exp\Bigl(\frac{1}{d}\sum_{i=1}^{d}\cos(2\pi x_i)\Bigr)
 //          + 20 + e
-template<int DIM>
+/*template<int DIM>
 __device__
 dual::DualNumber ackley(const dual::DualNumber* x) {
     dual::DualNumber sum_sq = 0.0;
@@ -369,7 +374,7 @@ struct Ackley {
     __host__ __device__ static double evaluate(const double* x) {
         return ackley<DIM>(x);
     }
-};
+};*/
 
 // Goldstein-Price Function
 //   f(x,y) = [1+(x+y+1)^2 (19-14x+3x^2-14y+6xy+3y^2)]
@@ -480,7 +485,7 @@ struct Himmelblau {
     }
 };
 
-template<typename Function, int DIM>
+/*template<typename Function, int DIM>
 __device__ void calculateGradientUsingAD(double *x, double *gradient) {
     dual::DualNumber xDual[DIM];
 
@@ -496,7 +501,7 @@ __device__ void calculateGradientUsingAD(double *x, double *gradient) {
         //printf("\nxDual[%d]: %f, grad[%d]: %f ",i,xDual[i].real,i,gradient[i]);
         xDual[i].dual = 0.0;
     }
-}
+}*/
 
 __device__ double generate_random_double(unsigned int seed, double lower, double upper)
 { 
