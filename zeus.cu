@@ -20,6 +20,28 @@
 #include "fun.cuh"
 #include "duals.cuh"
 
+// https://xorshift.di.unimi.it/splitmix64.c
+// Very fast 64-bit mixer — returns a new 64-bit value each time.
+__device__ inline uint64_t splitmix64(uint64_t &x) {
+    uint64_t z = (x += 0x9e3779b97f4a7c15ULL);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    //printf("split");
+    return z ^ (z >> 31);
+}
+
+// return a random double in [minVal, maxVal)
+__device__ inline double random_double(uint64_t &state,
+                                       double minVal,
+                                       double maxVal) {
+    // get 64‐bit random
+    uint64_t z = splitmix64(state);
+    // map high 53 bits into [0,1)
+    double u = (z >> 11) * (1.0 / 9007199254740992.0);
+    // scale into [minVal, maxVal)
+    return minVal + u * (maxVal - minVal);
+}
+
 namespace util {
 
 __device__ double dot_product_device(const double* a, const double* b, int size) {
@@ -347,15 +369,19 @@ __global__ void psoInitKernel(
     if (i >= N) return;
     const double vel_range = (upper - lower) * 0.1;
     // const unsigned int seed = 1234u;
-    uint64_t counter = seed ^ (uint64_t)i;
-    unsigned int basePos = 1234u ^ (counter * 0x9e3779b9);
-    unsigned int baseVel = 2468u ^ (counter * 0x7f4a7c15);
+    //uint64_t counter = seed ^ (uint64_t)i;
+    uint64_t state = seed * 0x9e3779b97f4a7c15ULL + (uint64_t)i;
+    //if (i==0) {
+    //  printf(">> initKernel sees seed = %llu\n", (unsigned long long)seed);
+    //}
+    //unsigned int basePos = 1234u ^ (unsigned int)(counter);
+    //unsigned int baseVel = 2468u ^ (unsigned int)(counter >> 32);
     // init position & velocity
     for (int d = 0; d < DIM; ++d) {
-        unsigned int seedX = basePos ^ (d * 0x85ebca6bu);
-        unsigned int seedV = baseVel ^ (d * 0xc2b2ae35u);
-        double rx = util::generate_random_double(seedX, lower, upper);
-	double rv = util::generate_random_double(seedV, -vel_range, vel_range);
+        //unsigned int seedX = basePos ^ (d * 0x85ebca6bu);
+        //unsigned int seedV = baseVel ^ (d * 0xc2b2ae35u);
+        double rx = random_double(state, lower, upper); //  util::generate_random_double(seedX, lower, upper);
+	double rv = random_double(state, -vel_range, +vel_range); // util::generate_random_double(seedV, -vel_range, vel_range);
         
 	X[i*DIM + d]      = rx;
         V[i*DIM + d]      = rv;
@@ -400,15 +426,16 @@ __global__ void psoIterKernel(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
     // const unsigned int seedBase = 5678u + iter*2;
-    
-    unsigned int base = 5678u + iter*seed;
+    uint64_t state = seed;
+    state = state * 6364136223846793005ULL + iter;   // mix in iteration
+    state = state * 6364136223846793005ULL + (uint64_t)i;  // mix in thread idx
+    //unsigned int base = 5678u + (iter+1) * seed;
     // update velocity & position
     for (int d = 0; d < DIM; ++d) {
-        unsigned int seed1 = base ^ (i*d + 0);
-        unsigned int seed2 = base ^ (i*d + 1);
-        
-	double r1 = util::generate_random_double(seed1, 0.0, 1.0);
-        double r2 = util::generate_random_double(seed2, 0.0, 1.0);
+        //uint64_t z1 = splitmix64(state);
+        //uint64_t z2 = splitmix64(state);
+	double r1 = random_double(state,0.0,1.0 ); //util::generate_random_double(seed1, 0.0, 1.0);
+        double r2 = random_double(state, 0.0, 1.0); //util::generate_random_double(seed2, 0.0, 1.0);
     	
 	double xi = X[i*DIM + d];
         double vi = V[i*DIM + d];
@@ -503,8 +530,7 @@ __global__ void optimizeKernel(const double lower,const double upper,
         #pragma unroll
         for (int d = 0; d < DIM; ++d) {
             x[d] = pso_array[idx*DIM + d];
-            if(idx == 0)
-                printf("x[%d]=%0.7f\n", d, x[d]);
+            //if(idx == 0) printf("x[%d]=%0.7f\n", d, x[d]);
         }
     } else {
         unsigned int seed = 456;
@@ -518,9 +544,7 @@ __global__ void optimizeKernel(const double lower,const double upper,
     double f0 = Function::evaluate(x);//rosenbrock_device(x, DIM);
     deviceResults[idx] = f0;
     double bestVal = f0;
-    if (idx == 0) {
-       printf("\n\nf0 = %f", f0);
-    }
+    //if (idx == 0) printf("\n\nf0 = %f", f0);
     int iter;
     util::calculateGradientUsingAD<Function, DIM>(x, g);
     for (iter = 0; iter < MAX_ITER; ++iter) {
@@ -1008,7 +1032,7 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
     double* deviceTrajectory = nullptr;
     double* pso_results_device=nullptr;
     float ms_init = 0.0f, ms_pso = 0.0f; 
-    if(PSO_ITER > 0) {
+    if(PSO_ITER >= 0) {
         pso_results_device = launch_pso<Function, DIM>(PSO_ITER, N,lower, upper, ms_init,ms_pso, seed);
         //printf("pso init: %.2f main loop: %.2f", ms_init, ms_pso); 
     }// end if pso_iter > 0 
@@ -1148,7 +1172,8 @@ int main(int argc, char* argv[]) {
     double tolerance = std::stod(argv[7]);
     int seed = std::stoi(argv[8]);
 
-    std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\n";
+    
+    std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\nseed: " << seed <<"\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
     const int dim = 10;
