@@ -1,5 +1,5 @@
 #pragma once
-#include "dual_numbers.cuh"
+#include "duals.cuh"
 
 namespace util {
 
