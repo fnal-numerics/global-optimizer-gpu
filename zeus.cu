@@ -23,21 +23,21 @@
 // https://xorshift.di.unimi.it/splitmix64.c
 // Very fast 64-bit mixer — returns a new 64-bit value each time.
 __device__ inline uint64_t splitmix64(uint64_t &x) {
-    uint64_t z = (x += 0x9e3779b97f4a7c15ULL);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    uint64_t z = (x += 0x9e3779b97f4a7c15ULL); // 1 add
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL; // 1 shift, 1 xor, 1 64x64 multiplier
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL; // 1 shift, 1, xor, 1 64x64 multiplier
     //printf("split");
-    return z ^ (z >> 31);
+    return z ^ (z >> 31); // 1 shift, 1 xor
 }
 
 // return a random double in [minVal, maxVal)
 __device__ inline double random_double(uint64_t &state,
                                        double minVal,
                                        double maxVal) {
-    // get 64‐bit random
+    // get 64‐bit random int
     uint64_t z = splitmix64(state);
     // map high 53 bits into [0,1)
-    double u = (z >> 11) * (1.0 / 9007199254740992.0);
+    double u = (z >> 11) * (1.0 / 9007199254740992.0); // discard lower 11 bits, leaving mantissa width of IEEE double, then normalize integer into [0,1)
     // scale into [minVal, maxVal)
     return minVal + u * (maxVal - minVal);
 }
@@ -301,14 +301,16 @@ struct Himmelblau {
     }
 };
 
-
-__device__ double generate_random_double(unsigned int seed, double lower, double upper)
+__device__ double generate_random_double(curandState* state, double lower,double upper)
 { 
-    curandState state;
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    curand_init(seed, idx, 0, &state); // initialize cuRAND with unique sequence number
-    return lower + (upper + (-lower)) * curand_uniform_double(&state);
-    //return -5.0 + (-3.0 + 5.12) * curand_uniform_double(&state); // return scaled double
+    return lower + (upper + (-lower)) * curand_uniform_double(state);
+}
+
+__global__ void setup_curand_states(curandState* states, uint64_t seed, int N)
+{
+    int idx = blockIdx.x*blockDim.x + threadIdx.x;
+    if (idx >= N) return;
+    curand_init(seed, idx, 0, &states[idx]);
 }
 
 template<typename Function, int DIM>
@@ -328,7 +330,11 @@ __device__ double line_search(double f0, const double* x, const double* p, const
     return alpha;
 }
 
+
 } // util namespace end
+
+
+
 
 __device__ __forceinline__
 double atomicMinDouble(double* addr, double val) {
@@ -363,25 +369,26 @@ __global__ void psoInitKernel(
     double*            gBestX,
     double*            gBestVal,
     int                N,
-    uint64_t	       seed)
+    uint64_t	       seed,
+    curandState*       states)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
+    
+    curandState localState = states[i];
     const double vel_range = (upper - lower) * 0.1;
     // const unsigned int seed = 1234u;
     //uint64_t counter = seed ^ (uint64_t)i;
-    uint64_t state = seed * 0x9e3779b97f4a7c15ULL + (uint64_t)i;
+    //uint64_t state = seed * 0x9e3779b97f4a7c15ULL + (uint64_t)i;
     //if (i==0) {
     //  printf(">> initKernel sees seed = %llu\n", (unsigned long long)seed);
     //}
-    //unsigned int basePos = 1234u ^ (unsigned int)(counter);
-    //unsigned int baseVel = 2468u ^ (unsigned int)(counter >> 32);
     // init position & velocity
     for (int d = 0; d < DIM; ++d) {
-        //unsigned int seedX = basePos ^ (d * 0x85ebca6bu);
-        //unsigned int seedV = baseVel ^ (d * 0xc2b2ae35u);
-        double rx = random_double(state, lower, upper); //  util::generate_random_double(seedX, lower, upper);
-	double rv = random_double(state, -vel_range, +vel_range); // util::generate_random_double(seedV, -vel_range, vel_range);
+        double rx = util::generate_random_double(&localState,lower, upper);
+        double rv = util::generate_random_double(&localState,-vel_range, vel_range);
+        //double rx = random_double(state, lower, upper); //  util::generate_random_double(seedX, lower, upper);
+	//double rv = random_double(state, -vel_range, +vel_range); // util::generate_random_double(seedV, -vel_range, vel_range);
         
 	X[i*DIM + d]      = rx;
         V[i*DIM + d]      = rv;
@@ -399,6 +406,7 @@ __global__ void psoInitKernel(
         for (int d = 0; d < DIM; ++d)
             gBestX[d] = pBestX[i*DIM + d];
     }
+    states[i] = localState; // next time we draw, we continue where we left off
 }
 
 // kernel #2: one PSO iteration (velocity+position update, personal & global best)
@@ -420,23 +428,28 @@ __global__ void psoIterKernel(
     bool               saveTraj,
     int                N,
     int                iter,
-    uint64_t	       seed)//,
+    uint64_t	       seed,
+    curandState*       states)//,
     //Result<DIM>&        best) // store the best particle's results at each iteration
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
-    // const unsigned int seedBase = 5678u + iter*2;
-    uint64_t state = seed;
+    
+    curandState localState = states[i];
+    /*uint64_t state = seed;
     state = state * 6364136223846793005ULL + iter;   // mix in iteration
     state = state * 6364136223846793005ULL + (uint64_t)i;  // mix in thread idx
-    //unsigned int base = 5678u + (iter+1) * seed;
+    */
+
     // update velocity & position
     for (int d = 0; d < DIM; ++d) {
         //uint64_t z1 = splitmix64(state);
         //uint64_t z2 = splitmix64(state);
-	double r1 = random_double(state,0.0,1.0 ); //util::generate_random_double(seed1, 0.0, 1.0);
-        double r2 = random_double(state, 0.0, 1.0); //util::generate_random_double(seed2, 0.0, 1.0);
-    	
+	//double r1 = random_double(state,0.0,1.0 ); //util::generate_random_double(seed1, 0.0, 1.0);
+        //double r2 = random_double(state, 0.0, 1.0); //util::generate_random_double(seed2, 0.0, 1.0);
+    	double r1 = util::generate_random_double(&localState, 0.0, 1.0);
+        double r2 = util::generate_random_double(&localState, 0.0, 1.0);
+
 	double xi = X[i*DIM + d];
         double vi = V[i*DIM + d];
         double pb = pBestX[i*DIM + d];
@@ -479,6 +492,7 @@ __global__ void psoIterKernel(
     for (int d = 0; d < DIM; ++d)
         printf(" %8.4f", gBestX[d]);
     printf(" ]\n");*/
+    states[i] = localState; // next time we draw, we continue where we left off
 }
 
 template<int DIM>
@@ -498,13 +512,15 @@ __device__ int d_threadsRemaining;
 template<typename Function, int DIM, unsigned int blockSize>
 __global__ void optimizeKernel(const double lower,const double upper,
 		const double* __restrict__ pso_array, // pso initialized positions
-		double* deviceResults, double* deviceTrajectory, int N,const int MAX_ITER,const int requiredConverged,const double tolerance, Result<DIM>* result, bool save_trajectories = false) {
+		double* deviceResults, double* deviceTrajectory, int N,const int MAX_ITER,const int requiredConverged,const double tolerance, Result<DIM>* result, curandState* states, bool save_trajectories = false) {
     extern __device__ int d_stopFlag;
     extern __device__ int d_threadsRemaining;
     extern __device__ int d_convergedCount;
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
+
+    curandState localState = states[idx];
 
     //int early_stopping = 0;
     double H[DIM * DIM];
@@ -533,12 +549,13 @@ __global__ void optimizeKernel(const double lower,const double upper,
             //if(idx == 0) printf("x[%d]=%0.7f\n", d, x[d]);
         }
     } else {
-        unsigned int seed = 456;
+        //unsigned int seed = 456;
         #pragma unroll
         for (int d = 0; d < DIM; ++d) {
             //x[d] = util::statelessUniform(idx,d,1,lower, upper, seed);
-	    x[d] = util::generate_random_double(seed + idx*DIM + d, lower, upper);
+	    x[d] = util::generate_random_double(&localState, lower, upper);
         }
+        states[idx] = localState;
     }	
     
     double f0 = Function::evaluate(x);//rosenbrock_device(x, DIM);
@@ -750,7 +767,7 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
 }
 
 
-void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm) {
+void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm) {
         std::string filename = "zeus_" + std::to_string(dim) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
         
@@ -772,10 +789,10 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
         
         double time_seconds = std::numeric_limits<double>::infinity();
         if (pso_iter > 0) {
-            time_seconds = (ms_init+ms_pso+ms_opt);
+            time_seconds = (ms_init+ms_pso+ms_opt+ms_rand);
             //printf("total time = pso + bfgs = total time = %0.4f ms\n", time_seconds);
         } else {
-            time_seconds = ms_opt;
+            time_seconds = (ms_opt+ms_rand);
             //printf("bfgs time = total time = %.4f ms\n", time_seconds);
         }
         outfile << fun_name << "\t" << N << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
@@ -792,7 +809,7 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
 }// end append_results_2_tsv
 
 template<typename Function, int DIM>
-double* launch_pso(const int PSO_ITER,const int N,const double lower,const double upper, float& ms_init, float& ms_pso,const int seed) { //, Result<DIM>& best) {
+double* launch_pso(const int PSO_ITER,const int N,const double lower,const double upper, float& ms_init, float& ms_pso,const int seed, curandState* states) { //, Result<DIM>& best) {
         // allocate PSO buffers on device
         double *dX, *dV, *dPBestVal, *dGBestX, *dGBestVal, *dPBestX;
         cudaMalloc(&dX,        N*DIM*sizeof(double));
@@ -828,7 +845,7 @@ double* launch_pso(const int PSO_ITER,const int N,const double lower,const doubl
              dX, dV,
              dPBestX, dPBestVal,
              dGBestX, dGBestVal,
-             N,seed);
+             N,seed, states);
         cudaDeviceSynchronize();
         cudaEventRecord(t1);
         cudaEventSynchronize(t1);
@@ -846,6 +863,7 @@ double* launch_pso(const int PSO_ITER,const int N,const double lower,const doubl
 
         // PSO iterations
         const double w  = 0.7298, c1 = 1.4962, c2 = 1.4962;
+        //const double w  = 0.5, c1 = 1.2, c2 = 1.5;
         for(int iter=1; iter<PSO_ITER+1; ++iter) {
             cudaEventRecord(t0);
             psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
@@ -857,7 +875,7 @@ double* launch_pso(const int PSO_ITER,const int N,const double lower,const doubl
                 dGBestX, dGBestVal,
                 nullptr,// traj
                 false,//saveTraj
-                N, iter, seed);//, best);
+                N, iter, seed, states);//, best);
             cudaDeviceSynchronize();
             cudaEventRecord(t1);
             cudaEventSynchronize(t1);
@@ -927,7 +945,7 @@ Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results
 }
 
 template<typename Function, int DIM>
-Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name) {
+Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name, curandState* states) {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
         &minGridSize, &blockSize,
@@ -965,7 +983,7 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
                 pso_results_device,
                 deviceResults,
                 deviceTrajectory,
-                N,MAX_ITER,requiredConverged,tolerance,d_results,
+                N,MAX_ITER,requiredConverged,tolerance,d_results,states,
                 /*saveTraj=*/true);
     } else {
         optimizeKernel<Function,DIM,128>
@@ -974,7 +992,7 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
                 pso_results_device,
                 deviceResults,
                 /*traj=*/nullptr,
-                N,MAX_ITER,requiredConverged,tolerance,d_results);
+                N,MAX_ITER,requiredConverged,tolerance,d_results,states);
     }
     cudaDeviceSynchronize();
     cudaEventRecord(stopOpt);
@@ -1019,6 +1037,26 @@ double calculate_euclidean_error(const std::string fun_name, const double* coord
    return std::sqrt(sum_sq);
 }// end calculate_euclidean_error
 
+inline curandState* initialize_states(int N, int seed, float& ms_rand) {
+        // PRNG setup
+        curandState* d_states;
+        cudaMalloc(&d_states, N * sizeof(curandState));
+
+        // Launch setup
+        int threads = 256;
+        int blocks  = (N + threads - 1) / threads;
+        cudaEvent_t t0, t1;
+        cudaEventCreate(&t0);
+        cudaEventCreate(&t1);
+        cudaEventRecord(t0);
+        util::setup_curand_states<<<blocks,threads>>>(d_states, seed, N);
+        cudaEventRecord(t1);
+        cudaEventSynchronize(t1);
+        cudaEventElapsedTime(&ms_rand, t0, t1);
+        cudaDeviceSynchronize();
+        return d_states;
+}
+
 template<typename Function, int DIM>
 Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance, const int seed)
 {
@@ -1027,25 +1065,27 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
         &minGridSize, &blockSize,
         optimizeKernel<Function,DIM,128>,
         0, N);
+    float ms_rand = 0.0f;
+    curandState* states = initialize_states(N, seed, ms_rand);
     //printf("Recommended block size: %d\n", blockSize);
     bool save_trajectories = askUser2saveTrajectories();
     double* deviceTrajectory = nullptr;
     double* pso_results_device=nullptr;
     float ms_init = 0.0f, ms_pso = 0.0f; 
     if(PSO_ITER >= 0) {
-        pso_results_device = launch_pso<Function, DIM>(PSO_ITER, N,lower, upper, ms_init,ms_pso, seed);
+        pso_results_device = launch_pso<Function, DIM>(PSO_ITER, N,lower, upper, ms_init,ms_pso, seed, states);
         //printf("pso init: %.2f main loop: %.2f", ms_init, ms_pso); 
     }// end if pso_iter > 0 
     if(!pso_results_device) 
        std::cout <<"still null" << std::endl;
     float ms_opt = 0.0f;
-    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name);
+    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name, states);
     if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
          cudaFree(pso_results_device);
     } 
 
     double error = calculate_euclidean_error(fun_name, best.coordinates, DIM);
-    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm);
+    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,ms_rand,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm);
      
     cudaError_t cuda_error  = cudaGetLastError();
     if (cuda_error != cudaSuccess) { 
