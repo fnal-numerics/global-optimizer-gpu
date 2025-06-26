@@ -565,7 +565,7 @@ __global__ void optimizeKernel(const double lower,const double upper,
     int iter;
     util::calculateGradientUsingAD<Function, DIM>(x, g);
     for (iter = 0; iter < MAX_ITER; ++iter) {
-        printf("inside BeeG File System");
+        //printf("inside BeeG File System");
         // check if somebody already asked to stop
 	if (atomicAdd(&d_stopFlag, 0) != 0) { // atomicAdd here just to get a strong read-barrier 
             // CUDA will fetch a coherent copy of the integer from global memory. 
@@ -719,10 +719,36 @@ cudaError_t writeTrajectoryData(
     return cudaSuccess;
 }
 
+double calculate_euclidean_error(const std::string fun_name, const double* coordinates, const int dim) {
+   double sum_sq = 0.0;
+
+   if(fun_name == "rosenbrock") {
+      for(int i=0;i<dim;i++) {
+         double diff = coordinates[i] - 1.0;
+         sum_sq += diff * diff;
+      }
+   } else if(fun_name == "goldstein_price") {
+        // Goldstein–Price is only defined in 2D (minimum at (0, -1))
+        if (dim != 2) {
+            fprintf(stderr,
+                    "Error: goldstein_price only defined for dim = 2\n");
+            return NAN;
+        }
+        double dx = coordinates[0] - 0.0;
+        double dy = coordinates[1] - (-1.0);
+        sum_sq = dx*dx + dy*dy;
+   }
+   else if(fun_name == "rastrigin" || fun_name == "ackley") { // both rastrigin and ackley have the same coordinates for the global minimum
+      for (int i = 0; i < dim; ++i) {
+         sum_sq += coordinates[i] * coordinates[i];
+      }
+   }
+   return std::sqrt(sum_sq);
+}// end calculate_euclidean_error
 
 // make it write to std::cout + dump to file
 template<int DIM>
-void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER) {
+void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER, const int run) {
     std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
 
     bool file_exists = std::filesystem::exists(filename);
@@ -732,10 +758,10 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
         std::cerr << "Error opening file: " << filename << std::endl;
         return;
     }
-
+ 
     // if file is new or empty, let us write the header
     if (file_empty) {
-        outfile << "fun\tidx\tstatus\titer\tfval\tnorm";
+        outfile << "fun\trun\tidx\tstatus\titer\terror\tfval\tnorm";
         for (int i = 0; i < DIM; i++)
             outfile << "\tcoord_" << i;
         outfile << std::endl;
@@ -744,10 +770,14 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
     std::string tab = "\t";
     int countConverged = 0, surrender = 0, stopped = 0;
     for (int i = 0; i < N; ++i) {
-        outfile << fun_name << tab << i << tab << std::scientific; 
+        outfile << fun_name << tab << run << tab << i << tab << std::scientific; 
         if (h_results[i].status == 1) {
             countConverged++;
             outfile << 1 << tab;
+            double error = calculate_euclidean_error(fun_name,  h_results[i].coordinates, DIM); 
+	    outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+            for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
+            outfile << std::endl;
         } else if(h_results[i].status == 2) { // particle was stopped early
             stopped++;
             outfile << 2 << tab;
@@ -756,10 +786,8 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
             surrender++;
             outfile << 0 << tab;
         }
-        outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
-        for(int d = 0; d < DIM; ++d) {
-            outfile << "\t"<< h_results[i].coordinates[d];
-        }
+        //outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+        for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
         outfile << std::endl;
     }
     //std::cout << "\ndumped data 2 "<< filename << "\n"<<countConverged <<" converged, "<<stopped << " stopped early, "<<surrender<<" surrendered\n"; 
@@ -767,7 +795,7 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
 }
 
 
-void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm) {
+void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm, const int run) {
         std::string filename = "zeus_" + std::to_string(dim) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
         
@@ -778,10 +806,9 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
             std::cerr << "Error opening file: " << filename << std::endl;
             return;
         }
-
         // if file is new or empty, let us write the header
         if (file_empty) {
-            outfile << "fun\tN\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm\t";
+            outfile << "fun\trun\tN\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm";
             for (int i = 0; i < dim; i++)
                 outfile << "\tcoord_" << i;
             outfile << std::endl;
@@ -795,7 +822,7 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
             time_seconds = (ms_opt+ms_rand);
             //printf("bfgs time = total time = %.4f ms\n", time_seconds);
         }
-        outfile << fun_name << "\t" << N << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
+        outfile << fun_name << "\t" << run << "\t" << N << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
             << time_seconds << "\t"
             << std::scientific << error << "\t" << globalMin << "\t" << norm <<"\t" ;
         for (int i = 0; i < dim; i++) {
@@ -862,8 +889,8 @@ double* launch_pso(const int PSO_ITER,const int N,const double lower,const doubl
         //printf(" ]\n\n");
 
         // PSO iterations
-        const double w  = 0.7298, c1 = 1.4962, c2 = 1.4962;
-        //const double w  = 0.5, c1 = 1.2, c2 = 1.5;
+        //const double w  = 0.7298, c1 = 1.4962, c2 = 1.4962;
+        const double w  = 0.5, c1 = 1.2, c2 = 1.5;
         for(int iter=1; iter<PSO_ITER+1; ++iter) {
             cudaEventRecord(t0);
             psoIterKernel<Function,DIM><<<psoGrid,psoBlock>>>(
@@ -945,7 +972,7 @@ Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results
 }
 
 template<typename Function, int DIM>
-Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name, curandState* states) {
+Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name, curandState* states, const int run) {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
         &minGridSize, &blockSize,
@@ -1003,8 +1030,7 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
     cudaEventDestroy(stopOpt);
 
     cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
-
-    //dump_data_2_file(h_results, fun_name, N, pso_iter);
+    dump_data_2_file(h_results, fun_name, N, pso_iter, run);
     /*int countConverged = 0, surrender = 0, stopped = 0;
     for (int i = 0; i < N; ++i) {
         if (h_results[i].status == 1) { 
@@ -1021,21 +1047,6 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
     
     return best;
 }
-
-double calculate_euclidean_error(const std::string fun_name, const double* coordinates, const int dim) {
-   double sum_sq = 0.0;
-   if(fun_name == "rosenbrock") {
-      for(int i=0;i<dim;i++) {
-         double diff = coordinates[i] - 1.0;
-         sum_sq += diff * diff;
-      }
-   } else if(fun_name == "rastrigin" || fun_name == "ackley") { // both rastrigin and ackley have the same coordinates for the global minimum
-      for (int i = 0; i < dim; ++i) {
-         sum_sq += coordinates[i] * coordinates[i];
-      }
-   }
-   return std::sqrt(sum_sq);
-}// end calculate_euclidean_error
 
 inline curandState* initialize_states(int N, int seed, float& ms_rand) {
         // PRNG setup
@@ -1058,7 +1069,7 @@ inline curandState* initialize_states(int N, int seed, float& ms_rand) {
 }
 
 template<typename Function, int DIM>
-Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance, const int seed)
+Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance, const int seed, const int run)
 {
     int blockSize, minGridSize;
     cudaOccupancyMaxPotentialBlockSize(
@@ -1079,13 +1090,13 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
     if(!pso_results_device) 
        std::cout <<"still null" << std::endl;
     float ms_opt = 0.0f;
-    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name, states);
+    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name, states, run);
     if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
          cudaFree(pso_results_device);
     } 
 
     double error = calculate_euclidean_error(fun_name, best.coordinates, DIM);
-    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,ms_rand,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm);
+    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,ms_rand,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm, run);
      
     cudaError_t cuda_error  = cudaGetLastError();
     if (cuda_error != cudaSuccess) { 
@@ -1095,7 +1106,7 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
 }// end Zeus
 
 template<typename Function, int DIM>
-void runOptimizationKernel(double lower, double upper, double* hostResults, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name, double tolerance, int seed) {
+void runOptimizationKernel(double lower, double upper, double* hostResults, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, std::string fun_name, double tolerance, int seed, const int run) {
 //void runOptimizationKernel(double* hostResults, int N, int dim) {
     /*printf("first 20 hostResults\n");
     for(int i=0;i<20;i++) {
@@ -1103,7 +1114,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int 
     }
     printf("\n");
     */
-    Result best = Zeus<Function, DIM>(lower, upper, hostResults, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance, seed);
+    Result best = Zeus<Function, DIM>(lower, upper, hostResults, N, MAX_ITER, PSO_ITERS, requiredConverged, fun_name,tolerance, seed, run);
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -1127,7 +1138,7 @@ void runOptimizationKernel(double lower, double upper, double* hostResults, int 
 
 
 template<int dim>
-void selectAndRunOptimization(double lower, double upper,double* hostResults, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, double tolerance, int seed) {
+void selectAndRunOptimization(double lower, double upper,double* hostResults, int N, int MAX_ITER,int PSO_ITERS,int requiredConverged, double tolerance, int seed, const int run) {
     int choice;
     std::cout << "\nSelect function to optimize:\n"
               << " 1. Rosenbrock\n"
@@ -1147,22 +1158,22 @@ void selectAndRunOptimization(double lower, double upper,double* hostResults, in
     switch(choice) {
         case 1:
             std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged,"rosenbrock", tolerance, seed);
+            runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged,"rosenbrock", tolerance, seed, run);
             break;
         case 2:
             std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "rastrigin", tolerance, seed);
+            runOptimizationKernel<util::Rastrigin<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "rastrigin", tolerance, seed, run);
             break;
         case 3:
             std::cout << "\n\n\tAckley Function\n" << std::endl;
-            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "ackley", tolerance, seed);
+            runOptimizationKernel<util::Ackley<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "ackley", tolerance, seed, run);
             break;
         case 4:
             if constexpr (dim != 2) {
                 std::cerr << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "goldstein", tolerance, seed);
+                runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "goldstein", tolerance, seed, run);
             }
             break;
         case 5:
@@ -1170,7 +1181,7 @@ void selectAndRunOptimization(double lower, double upper,double* hostResults, in
                 std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tEggholder Function\n" << std::endl;
-                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "eggholder", tolerance, seed);
+                runOptimizationKernel<util::Eggholder<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "eggholder", tolerance, seed, run);
             }
             break;
         case 6:
@@ -1178,7 +1189,7 @@ void selectAndRunOptimization(double lower, double upper,double* hostResults, in
                 std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
             } else {
                 std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "himmelblau", tolerance, seed);
+                runOptimizationKernel<util::Himmelblau<dim>, dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, "himmelblau", tolerance, seed, run);
             }
             break;
         case 7:
@@ -1199,8 +1210,8 @@ void selectAndRunOptimization(double lower, double upper,double* hostResults, in
 #if !defined(UNIT_TEST) && !defined(TABLE_GEN)
 int main(int argc, char* argv[]) {
     printf("Production main() running\n");
-    if (argc != 9) {
-	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <pso_iters> <converged> <number_of_optimizations> <tolerance> <seed>\n";
+    if (argc != 10) {
+	 std::cerr << "Usage: " << argv[0] << " <lower_bound> <upper_bound> <max_iter> <pso_iters> <converged> <number_of_optimizations> <tolerance> <seed> <run>\n";
         return 1;
     }
     double lower = std::atof(argv[1]);
@@ -1211,12 +1222,12 @@ int main(int argc, char* argv[]) {
     int N = std::stoi(argv[6]);
     double tolerance = std::stod(argv[7]);
     int seed = std::stoi(argv[8]);
-
+    int run = std::stoi(argv[9]);
     
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\nseed: " << seed <<"\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 10;
+    const int dim = 2;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
@@ -1240,7 +1251,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < N; i++) {
             hostResults[i] = f0;
         }
-        selectAndRunOptimization<dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, tolerance, seed);
+        selectAndRunOptimization<dim>(lower, upper, hostResults, N, MAX_ITER,PSO_ITERS, requiredConverged, tolerance, seed, run);
         std::cout << "\nDo you want to optimize another function? (y/n): ";
         std::cin >> cont;
         std::cin.ignore();
