@@ -495,6 +495,13 @@ __global__ void psoIterKernel(
     states[i] = localState; // next time we draw, we continue where we left off
 }
 
+struct Convergence {
+    int actual;
+    int claimed;
+    int surrendered;
+    int stopped;
+};
+
 template<int DIM>
 struct Result {
     int idx;
@@ -503,6 +510,7 @@ struct Result {
     double gradientNorm;
     double coordinates[DIM];
     int iter;
+    Convergence c;
 };
 
 __device__ int d_stopFlag;  // 0 = keep going; 1 = stop immediately
@@ -746,10 +754,11 @@ double calculate_euclidean_error(const std::string fun_name, const double* coord
    return std::sqrt(sum_sq);
 }// end calculate_euclidean_error
 
+
 // make it write to std::cout + dump to file
 template<int DIM>
-void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER, const int run) {
-    std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
+Convergence dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER, const int run) {
+    /*std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
 
     bool file_exists = std::filesystem::exists(filename);
     bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
@@ -766,36 +775,45 @@ void dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,co
             outfile << "\tcoord_" << i;
         outfile << std::endl;
     }// end if file is empty
-
+    */
+    Convergence result;
+    
     std::string tab = "\t";
+    int actually_converged = 0;
     int countConverged = 0, surrender = 0, stopped = 0;
     for (int i = 0; i < N; ++i) {
-        outfile << fun_name << tab << run << tab << i << tab << std::scientific; 
+        //outfile << fun_name << tab << run << tab << i << tab << std::scientific; 
         if (h_results[i].status == 1) {
             countConverged++;
-            outfile << 1 << tab;
+            //outfile << 1 << tab;
             double error = calculate_euclidean_error(fun_name,  h_results[i].coordinates, DIM); 
-	    outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
-            for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
-            outfile << std::endl;
+	    if(error < 0.5) {actually_converged++;}
+            //outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+            //for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
+            //outfile << std::endl;
         } else if(h_results[i].status == 2) { // particle was stopped early
             stopped++;
-            outfile << 2 << tab;
+            //outfile << 2 << tab;
             //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
         } else {
             surrender++;
-            outfile << 0 << tab;
+            //outfile << 0 << tab;
         }
         //outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
-        for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
-        outfile << std::endl;
+        //for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
+        //outfile << std::endl;
     }
+    result.actual = actually_converged;
+    result.claimed = countConverged;
+    result.surrendered = surrender;
+    result.stopped = stopped;
+    return result;
     //std::cout << "\ndumped data 2 "<< filename << "\n"<<countConverged <<" converged, "<<stopped << " stopped early, "<<surrender<<" surrendered\n"; 
     //printf("\ndumped data 2 %s\n%d converged, %d stopped early, %d surrendered\n",filename.c_str(),countConverged, stopped, surrender);
 }
 
 
-void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm, const int run) {
+void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm, const int run, const int claimed, const int actual, const int surrendered, const int stopped) {
         std::string filename = "zeus_" + std::to_string(dim) + "d_results.tsv";
         std::ofstream outfile(filename, std::ios::app);
         
@@ -808,7 +826,7 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
         }
         // if file is new or empty, let us write the header
         if (file_empty) {
-            outfile << "fun\trun\tN\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm";
+            outfile << "fun\trun\tN\tclaimed\tactual\tsurrender\tstopped\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm";
             for (int i = 0; i < dim; i++)
                 outfile << "\tcoord_" << i;
             outfile << std::endl;
@@ -822,7 +840,7 @@ void append_results_2_tsv(const int dim,const int N, const std::string fun_name,
             time_seconds = (ms_opt+ms_rand);
             //printf("bfgs time = total time = %.4f ms\n", time_seconds);
         }
-        outfile << fun_name << "\t" << run << "\t" << N << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
+        outfile << fun_name << "\t" << run << "\t" << N <<"\t"<<claimed << "\t" << actual<<"\t"<<surrendered<<"\t"<<stopped << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
             << time_seconds << "\t"
             << std::scientific << error << "\t" << globalMin << "\t" << norm <<"\t" ;
         for (int i = 0; i < dim; i++) {
@@ -1030,7 +1048,7 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
     cudaEventDestroy(stopOpt);
 
     cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
-    dump_data_2_file(h_results, fun_name, N, pso_iter, run);
+    Convergence c = dump_data_2_file(h_results, fun_name, N, pso_iter, run);
     /*int countConverged = 0, surrender = 0, stopped = 0;
     for (int i = 0; i < N; ++i) {
         if (h_results[i].status == 1) { 
@@ -1044,7 +1062,7 @@ Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, cons
     //printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
     
     Result best = launch_reduction<DIM>(N, deviceResults, h_results);
-    
+    best.c = c; 
     return best;
 }
 
@@ -1096,7 +1114,7 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
     } 
 
     double error = calculate_euclidean_error(fun_name, best.coordinates, DIM);
-    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,ms_rand,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm, run);
+    append_results_2_tsv(DIM,N,fun_name,ms_init,ms_pso,ms_opt,ms_rand,MAX_ITER, PSO_ITER,error,best.fval, best.coordinates, best.idx, best.status, best.gradientNorm, run, best.c.claimed, best.c.actual, best.c.surrendered, best.c.stopped);
      
     cudaError_t cuda_error  = cudaGetLastError();
     if (cuda_error != cudaSuccess) { 
@@ -1227,7 +1245,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Tolerance: " << std::setprecision(10) << tolerance << "\nseed: " << seed <<"\n";
 
     //const size_t N = 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-    const int dim = 2;
+    const int dim = 10;
     double hostResults[N];// = new double[N];
     std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER << " dim = " << dim << std::endl;
      
