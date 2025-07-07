@@ -4,7 +4,7 @@ echo "Compiling CUDA code.."
 #crun.cuda nvcc -o pso parallel_pso.cu
 ITER=10000
 #N=335544320
-N=131072
+N=1000000
 for i in {1..100}
 do
     echo -e "\n\n\t\t=== Run $i ===="
