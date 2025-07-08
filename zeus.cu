@@ -301,7 +301,6 @@ calculate_euclidean_error(const std::string fun_name,
 } // end calculate_euclidean_error
 
 // make it write to std::cout + dump to file
-<<<<<<< HEAD
 template <int DIM>
 Convergence
 dump_data_2_file(const Result<DIM>* h_results,
@@ -310,30 +309,6 @@ dump_data_2_file(const Result<DIM>* h_results,
                  const int PSO_ITER,
                  const int run)
 {
-  /*std::string filename = "./data/" + fun_name +"_" +
-  std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) +
-  "d_particledata.tsv";
-=======
-template<int DIM>
-Convergence dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER, const int run) {
-    /*std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
-
-    bool file_exists = std::filesystem::exists(filename);
-    bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
-    std::ofstream outfile(filename, std::ios::app);
-    if (!outfile.is_open()) {
-        std::cerr << "Error opening file: " << filename << std::endl;
-        return;
-    }
- 
-    // if file is new or empty, let us write the header
-    if (file_empty) {
-        outfile << "fun\trun\tidx\tstatus\titer\terror\tfval\tnorm";
-        for (int i = 0; i < DIM; i++)
-            outfile << "\tcoord_" << i;
-        outfile << std::endl;
-    }// end if file is empty
-    */
     Convergence result;
     
     std::string tab = "\t";
@@ -573,7 +548,6 @@ Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int 
     if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
          cudaFree(pso_results_device);
     } 
->>>>>>> a64e2a6 (placed pso kernels to namespace pso)
 
   bool file_exists = std::filesystem::exists(filename);
   bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) :
