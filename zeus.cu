@@ -19,29 +19,8 @@
 #include "fun.h"
 #include "duals.cuh"
 #include "utils.cuh"
+#include "pso.cuh"
 
-struct Convergence {
-  int actual;
-  int claimed;
-  int surrendered;
-  int stopped;
-};
-
-template <int DIM>
-struct Result {
-  int idx;
-  int status; // 1 if converged, else if stopped_bc_someone_flipped_the_flag: 2,
-              // else 0
-  double fval; // function value
-  double gradientNorm;
-  double coordinates[DIM];
-  int iter;
-  Convergence c;
-};
-
-__device__ int d_stopFlag;       // 0 = keep going; 1 = stop immediately
-__device__ int d_convergedCount; // how many threads have converged?
-__device__ int d_threadsRemaining;
 
 template <typename Function, int DIM, unsigned int blockSize>
 __global__ void
@@ -62,7 +41,7 @@ optimizeKernel(
   extern __device__ int d_stopFlag;
   extern __device__ int d_threadsRemaining;
   extern __device__ int d_convergedCount;
-
+ 
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= N)
     return;
@@ -322,6 +301,7 @@ calculate_euclidean_error(const std::string fun_name,
 } // end calculate_euclidean_error
 
 // make it write to std::cout + dump to file
+<<<<<<< HEAD
 template <int DIM>
 Convergence
 dump_data_2_file(const Result<DIM>* h_results,
@@ -333,6 +313,267 @@ dump_data_2_file(const Result<DIM>* h_results,
   /*std::string filename = "./data/" + fun_name +"_" +
   std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) +
   "d_particledata.tsv";
+=======
+template<int DIM>
+Convergence dump_data_2_file(const Result<DIM>* h_results,const std::string fun_name,const int N, const int PSO_ITER, const int run) {
+    /*std::string filename = "./data/" + fun_name +"_" + std::to_string(PSO_ITER)+"psoit_" + std::to_string(DIM) + "d_particledata.tsv";
+
+    bool file_exists = std::filesystem::exists(filename);
+    bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
+    std::ofstream outfile(filename, std::ios::app);
+    if (!outfile.is_open()) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return;
+    }
+ 
+    // if file is new or empty, let us write the header
+    if (file_empty) {
+        outfile << "fun\trun\tidx\tstatus\titer\terror\tfval\tnorm";
+        for (int i = 0; i < DIM; i++)
+            outfile << "\tcoord_" << i;
+        outfile << std::endl;
+    }// end if file is empty
+    */
+    Convergence result;
+    
+    std::string tab = "\t";
+    int actually_converged = 0;
+    int countConverged = 0, surrender = 0, stopped = 0;
+    for (int i = 0; i < N; ++i) {
+        //outfile << fun_name << tab << run << tab << i << tab << std::scientific; 
+        if (h_results[i].status == 1) {
+            countConverged++;
+            //outfile << 1 << tab;
+            double error = calculate_euclidean_error(fun_name,  h_results[i].coordinates, DIM); 
+	    if(error < 0.5) {actually_converged++;}
+            //outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+            //for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
+            //outfile << std::endl;
+        } else if(h_results[i].status == 2) { // particle was stopped early
+            stopped++;
+            //outfile << 2 << tab;
+            //printf("Thread %d was stopped early (iter=%d)\n", i, h_results[i].iter);
+        } else {
+            surrender++;
+            //outfile << 0 << tab;
+        }
+        //outfile << h_results[i].iter << tab << h_results[i].fval << tab << h_results[i].gradientNorm;
+        //for(int d = 0; d < DIM; ++d) { outfile << "\t"<< h_results[i].coordinates[d]; }
+        //outfile << std::endl;
+    }
+    result.actual = actually_converged;
+    result.claimed = countConverged;
+    result.surrendered = surrender;
+    result.stopped = stopped;
+    return result;
+    //std::cout << "\ndumped data 2 "<< filename << "\n"<<countConverged <<" converged, "<<stopped << " stopped early, "<<surrender<<" surrendered\n"; 
+    //printf("\ndumped data 2 %s\n%d converged, %d stopped early, %d surrendered\n",filename.c_str(),countConverged, stopped, surrender);
+}
+
+
+void append_results_2_tsv(const int dim,const int N, const std::string fun_name,float ms_init, float ms_pso,float ms_opt,float ms_rand, const int max_iter, const int pso_iter,const double error,const double globalMin, double* hostCoordinates, const int idx, const int status, const double norm, const int run, const int claimed, const int actual, const int surrendered, const int stopped) {
+        std::string filename = "zeus_" + std::to_string(dim) + "d_results.tsv";
+        std::ofstream outfile(filename, std::ios::app);
+        
+        bool file_exists = std::filesystem::exists(filename);
+        bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) : true;
+        //std::ofstream outfile(filename, std::ios::app);
+        if (!outfile.is_open()) {
+            std::cerr << "Error opening file: " << filename << std::endl;
+            return;
+        }
+        // if file is new or empty, let us write the header
+        if (file_empty) {
+            outfile << "fun\trun\tN\tclaimed\tactual\tsurrender\tstopped\tidx\tstatus\tbfgs_iter\tpso_iter\ttime\terror\tfval\tnorm";
+            for (int i = 0; i < dim; i++)
+                outfile << "\tcoord_" << i;
+            outfile << std::endl;
+        }// end if file is empty
+        
+        double time_seconds = std::numeric_limits<double>::infinity();
+        if (pso_iter > 0) {
+            time_seconds = (ms_init+ms_pso+ms_opt+ms_rand);
+            //printf("total time = pso + bfgs = total time = %0.4f ms\n", time_seconds);
+        } else {
+            time_seconds = (ms_opt+ms_rand);
+            //printf("bfgs time = total time = %.4f ms\n", time_seconds);
+        }
+        outfile << fun_name << "\t" << run << "\t" << N <<"\t"<<claimed << "\t" << actual<<"\t"<<surrendered<<"\t"<<stopped << "\t"<<idx<<"\t"<<status <<"\t" << max_iter << "\t" << pso_iter << "\t"
+            << time_seconds << "\t"
+            << std::scientific << error << "\t" << globalMin << "\t" << norm <<"\t" ;
+        for (int i = 0; i < dim; i++) {
+            outfile << hostCoordinates[i];
+            if (i < dim - 1)
+                outfile << "\t";
+        }
+        outfile << "\n";
+        outfile.close();
+        //printf("results are saved to %s", filename.c_str());
+}// end append_results_2_tsv
+
+template<int DIM>
+Result<DIM> launch_reduction(int N, double* deviceResults,Result<DIM>* h_results) {
+    // ArgMin & final print
+    cub::KeyValuePair<int,double>* deviceArgMin;
+    cudaMalloc(&deviceArgMin,     sizeof(*deviceArgMin));
+    void*  d_temp_storage = nullptr;
+    size_t temp_bytes      = 0;
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+    cudaMalloc(&d_temp_storage, temp_bytes);
+    cub::DeviceReduce::ArgMin(
+        d_temp_storage, temp_bytes,
+        deviceResults, deviceArgMin, N);
+
+    cub::KeyValuePair<int,double> h_argMin;
+    cudaMemcpy(&h_argMin, deviceArgMin,
+               sizeof(h_argMin),
+               cudaMemcpyDeviceToHost);
+
+    int    globalMinIndex = h_argMin.key;
+
+    // print the “best” thread’s full record
+    Result best = h_results[globalMinIndex];
+    printf("Global best summary:\n");
+    printf("   idx          = %d\n", best.idx);
+    printf("   status       = %d\n", best.status);
+    printf("   fval         = %.6f\n",best.fval);
+    printf("   gradientNorm = %.6f\n",best.gradientNorm);
+    printf("   iter         = %d\n",best.iter);
+    printf("   coords       = [");
+    for (int d = 0; d < DIM; ++d) {
+         printf(" %.7f", best.coordinates[d]);
+    }
+    printf(" ]\n");
+
+    cudaFree(deviceResults);
+    cudaFree(deviceArgMin);
+    cudaFree(d_temp_storage);
+    return best;
+}
+
+template<typename Function, int DIM>
+Result<DIM> launch_bfgs(const int N,const int pso_iter, const int MAX_ITER, const double upper, const double lower,double* pso_results_device,double* hostResults, double* deviceTrajectory, const int requiredConverged, const double tolerance, bool save_trajectories, float& ms_opt, std::string fun_name, curandState* states, const int run) {
+    int blockSize, minGridSize;
+    cudaOccupancyMaxPotentialBlockSize(
+        &minGridSize, &blockSize,
+        optimizeKernel<Function,DIM,128>,
+        0, N);
+    //printf("\nRecommended block size: %d\n", blockSize);
+    
+    // prepare optimizer buffers & copy hostResults --> device
+    double* deviceResults;
+    cudaMalloc(&deviceResults,    N * sizeof(double));
+    cudaMemcpy(deviceResults, hostResults, N*sizeof(double), cudaMemcpyHostToDevice);
+
+    dim3 optBlock(blockSize);
+    dim3 optGrid((N + blockSize - 1) / blockSize);
+
+    // optimizeKernel time
+    cudaEvent_t startOpt, stopOpt;
+    cudaEventCreate(&startOpt);
+    cudaEventCreate(&stopOpt);
+    cudaEventRecord(startOpt);
+
+    Result<DIM>* h_results = new Result<DIM>[N];            // host copy
+    Result<DIM>* d_results = nullptr;
+    cudaMalloc(&d_results, N * sizeof(Result<DIM>));
+    /*
+    for(int i=0;i<DIM;i++){ 
+        std::cout << hPBestX[i] << " ";
+    }*/
+    std::cout << std::endl;
+    if (save_trajectories) {
+        cudaMalloc(&deviceTrajectory, N*MAX_ITER*DIM*sizeof(double));
+        optimizeKernel<Function,DIM,128>
+            <<<optGrid,optBlock>>>(
+                lower, upper,
+                pso_results_device,
+                deviceResults,
+                deviceTrajectory,
+                N,MAX_ITER,requiredConverged,tolerance,d_results,states,
+                /*saveTraj=*/true);
+    } else {
+        optimizeKernel<Function,DIM,128>
+            <<<optGrid,optBlock>>>(
+                lower, upper,
+                pso_results_device,
+                deviceResults,
+                /*traj=*/nullptr,
+                N,MAX_ITER,requiredConverged,tolerance,d_results,states);
+    }
+    cudaDeviceSynchronize();
+    cudaEventRecord(stopOpt);
+    cudaEventSynchronize(stopOpt);
+    cudaEventElapsedTime(&ms_opt, startOpt, stopOpt);
+    //printf("\nOptimization Kernel execution time = %.3f ms\n", ms_opt);
+    cudaEventDestroy(startOpt);
+    cudaEventDestroy(stopOpt);
+
+    cudaMemcpy(h_results, d_results, N * sizeof(Result<DIM>), cudaMemcpyDeviceToHost);
+    Convergence c = dump_data_2_file(h_results, fun_name, N, pso_iter, run);
+    /*int countConverged = 0, surrender = 0, stopped = 0;
+    for (int i = 0; i < N; ++i) {
+        if (h_results[i].status == 1) { 
+            countConverged++;
+        } else if(h_results[i].status == 2) { // particle was stopped early
+            stopped++;
+        } else {
+            surrender++;
+        }
+    }*/
+    //printf("\n%d converged, %d stopped early, %d surrendered\n",countConverged, stopped, surrender);
+    
+    Result best = launch_reduction<DIM>(N, deviceResults, h_results);
+    best.c = c; 
+    return best;
+}
+
+inline curandState* initialize_states(int N, int seed, float& ms_rand) {
+        // PRNG setup
+        curandState* d_states;
+        cudaMalloc(&d_states, N * sizeof(curandState));
+
+        // Launch setup
+        int threads = 256;
+        int blocks  = (N + threads - 1) / threads;
+        cudaEvent_t t0, t1;
+        cudaEventCreate(&t0);
+        cudaEventCreate(&t1);
+        cudaEventRecord(t0);
+        util::setup_curand_states<<<blocks,threads>>>(d_states, seed, N);
+        cudaEventRecord(t1);
+        cudaEventSynchronize(t1);
+        cudaEventElapsedTime(&ms_rand, t0, t1);
+        cudaDeviceSynchronize();
+        return d_states;
+}
+
+template<typename Function, int DIM>
+Result<DIM> Zeus(const double lower,const double upper, double* hostResults,int N,int MAX_ITER, int PSO_ITER, int requiredConverged,std::string fun_name, double tolerance, const int seed, const int run)
+{
+    int blockSize, minGridSize;
+    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize,optimizeKernel<Function,DIM,128>,0, N);
+    float ms_rand = 0.0f;
+    curandState* states = initialize_states(N, seed, ms_rand);
+    //printf("Recommended block size: %d\n", blockSize);
+    bool save_trajectories = askUser2saveTrajectories();
+    double* deviceTrajectory = nullptr;
+    double* pso_results_device=nullptr;
+    float ms_init = 0.0f, ms_pso = 0.0f; 
+    if(PSO_ITER >= 0) {
+        pso_results_device = pso::launch<Function, DIM>(PSO_ITER, N,lower, upper, ms_init,ms_pso, seed, states);
+        //printf("pso init: %.2f main loop: %.2f", ms_init, ms_pso); 
+    }// end if pso_iter > 0 
+    if(!pso_results_device) 
+       std::cout <<"still null" << std::endl;
+    float ms_opt = 0.0f;
+    Result best = launch_bfgs<Function, DIM>(N,PSO_ITER, MAX_ITER,upper, lower, pso_results_device, hostResults, deviceTrajectory, requiredConverged,tolerance, save_trajectories, ms_opt, fun_name, states, run);
+    if(PSO_ITER > 0) { // optimzation routine is finished, so we can free that array on the device
+         cudaFree(pso_results_device);
+    } 
+>>>>>>> a64e2a6 (placed pso kernels to namespace pso)
 
   bool file_exists = std::filesystem::exists(filename);
   bool file_empty = file_exists ? (std::filesystem::file_size(filename) == 0) :
