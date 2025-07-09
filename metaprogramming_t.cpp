@@ -1,10 +1,11 @@
 #include <vector>
 #include <iostream>
+#include "zeus.cuh" 
 
 double
 square(double x)
 {
-  return x * x;
+  return x * 2.5;
 }
 
 int
@@ -16,4 +17,5 @@ main()
   for (auto val : result) {
     std::cout << val << " ";
   }
+  std::cout << std::endl;  
 }
