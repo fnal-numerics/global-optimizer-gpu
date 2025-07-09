@@ -21,12 +21,14 @@
 #include "utils.cuh"
 #include "pso.cuh"
 #include "bfgs.cuh"
-//#include "zeus.cuh"
+#include "zeus.cuh"
 
 __device__ int d_stopFlag         = 0;
 __device__ int d_convergedCount   = 0;
 __device__ int d_threadsRemaining = 0;
 
+
+/*
 bool
 askUser2saveTrajectories()
 {
@@ -346,12 +348,12 @@ runOptimizationKernel(double lower,
                       const int run)
 {
   // void runOptimizationKernel(double* hostResults, int N, int dim) {
-  /*printf("first 20 hostResults\n");
+  printf("first 20 hostResults\n");
   for(int i=0;i<20;i++) {
      printf(" %f ",hostResults[i]);
   }
   printf("\n");
-  */
+  
   Result best = Zeus<Function, DIM>(lower,
                                     upper,
                                     hostResults,
@@ -376,13 +378,14 @@ runOptimizationKernel(double lower,
   cudaEventDestroy(stop);
   // printf("took %f ms\n",  milli);
 
-  /*printf("first 20 function values in hostResults\n");
+  printf("first 20 function values in hostResults\n");
   for(int i=0;i<20;i++) {
      printf(" %f ",hostResults[i]);
-  }*/
+  }
   printf("\n");
   // cudaMemGetInfo
 }
+*/
 
 template <int dim>
 void
@@ -417,7 +420,7 @@ selectAndRunOptimization(double lower,
   switch (choice) {
     case 1:
       std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-      runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower,
+      zeus::runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower,
                                                         upper,
                                                         hostResults,
                                                         N,
@@ -431,7 +434,7 @@ selectAndRunOptimization(double lower,
       break;
     case 2:
       std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-      runOptimizationKernel<util::Rastrigin<dim>, dim>(lower,
+      zeus::runOptimizationKernel<util::Rastrigin<dim>, dim>(lower,
                                                        upper,
                                                        hostResults,
                                                        N,
@@ -445,7 +448,7 @@ selectAndRunOptimization(double lower,
       break;
     case 3:
       std::cout << "\n\n\tAckley Function\n" << std::endl;
-      runOptimizationKernel<util::Ackley<dim>, dim>(lower,
+      zeus::runOptimizationKernel<util::Ackley<dim>, dim>(lower,
                                                     upper,
                                                     hostResults,
                                                     N,
@@ -463,7 +466,7 @@ selectAndRunOptimization(double lower,
           << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
       } else {
         std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-        runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower,
+        zeus::runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower,
                                                               upper,
                                                               hostResults,
                                                               N,
@@ -481,7 +484,7 @@ selectAndRunOptimization(double lower,
         std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
       } else {
         std::cout << "\n\n\tEggholder Function\n" << std::endl;
-        runOptimizationKernel<util::Eggholder<dim>, dim>(lower,
+        zeus::runOptimizationKernel<util::Eggholder<dim>, dim>(lower,
                                                          upper,
                                                          hostResults,
                                                          N,
@@ -499,7 +502,7 @@ selectAndRunOptimization(double lower,
         std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
       } else {
         std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-        runOptimizationKernel<util::Himmelblau<dim>, dim>(lower,
+        zeus::runOptimizationKernel<util::Himmelblau<dim>, dim>(lower,
                                                           upper,
                                                           hostResults,
                                                           N,
