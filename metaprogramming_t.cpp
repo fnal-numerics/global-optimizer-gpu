@@ -8,9 +8,11 @@ square(double x)
   return x * 2.5;
 }
 
+static constexpr int d = 10;
+
 struct Rosen
 {
-    static constexpr int DIM = 10;
+    static constexpr int DIM = d;
 
     template<class T>
     __host__ __device__
@@ -18,7 +20,7 @@ struct Rosen
     {
         T sum = T(0);
         #pragma unroll
-        for (int i = 0; i < DIM - 1; ++i) {
+        for (int i = 0; i < d-1; ++i) {
             T t1 = T(1)   - x[i];
             T t2 = x[i+1] - x[i]*x[i];
             sum += t1*t1 + T(100)*t2*t2;
