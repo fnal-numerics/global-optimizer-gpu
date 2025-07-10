@@ -186,20 +186,7 @@ main(int argc, char* argv[])
             << " dim = " << dim << std::endl;
 
   double f0 = 333777; // initial function value
-
-  // logic to set the stact size limit to 65 kB per thread
-  size_t currentStackSize = 0;
-  cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
-  printf("Current stack size: %zu bytes\n", currentStackSize);
-  size_t newStackSize = 64 * 1024; // 65 kB
-  cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
-  if (err != cudaSuccess) {
-    printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
-    return 1;
-  } else {
-    printf("Successfully set stack size to %zu bytes\n", newStackSize);
-  } // end stack size limit
-
+  util::set_stack_size();
   char cont = 'y';
   while (cont == 'y' || cont == 'Y') {
     for (int i = 0; i < N; i++) {

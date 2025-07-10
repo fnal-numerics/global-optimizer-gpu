@@ -29,6 +29,19 @@ struct Rosen
     }
 };
 
+void set_stack_size() {
+  // logic to set the stact size limit to 65 kB per thread
+  size_t currentStackSize = 0;
+  cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
+  //printf("Current stack size: %zu bytes\n", currentStackSize);
+  size_t newStackSize = 64 * 1024; // 65 kB
+  cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
+  if (err != cudaSuccess) {
+    printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
+    //return 1;
+  }  
+}
+
 int
 main()
 {
@@ -45,16 +58,7 @@ main()
   for (int i = 0; i < N; i++) {
       host[i] = 333777.0;
   }
-  // logic to set the stact size limit to 65 kB per thread
-  size_t currentStackSize = 0;
-  cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
-  //printf("Current stack size: %zu bytes\n", currentStackSize);
-  size_t newStackSize = 64 * 1024; // 65 kB
-  cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, newStackSize);
-  if (err != cudaSuccess) {
-    printf("cudaDeviceSetLimit error: %s\n", cudaGetErrorString(err));
-    return 1;
-  } 
+  util::set_stack_size();
 
   auto res = zeus::Zeus(Rosen{},-5.12, 5.12,host,1024,10000,5,100,"rosenbrock",1e-8,42,0);
   std::cout << "global minimum for rosenbrock: "<<res.fval <<std::endl;
