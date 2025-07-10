@@ -10,149 +10,146 @@ __device__ int d_convergedCount   = 0;
 __device__ int d_threadsRemaining = 0;
 
 
-
 template <int dim>
 void
-selectAndRunOptimization(double lower,
-                         double upper,
-                         double* hostResults,
-                         int N,
-                         int MAX_ITER,
-                         int PSO_ITERS,
-                         int requiredConverged,
-                         double tolerance,
-                         int seed,
+selectAndRunOptimization(double   lower,
+                         double   upper,
+                         double*  hostResults,
+                         int      N,
+                         int      MAX_ITER,
+                         int      PSO_ITERS,
+                         int      requiredConverged,
+                         double   tolerance,
+                         int      seed,
                          const int run)
 {
+  double lo = lower;
+  double hi = upper;
+
   int choice;
   std::cout << "\nSelect function to optimize:\n"
             << " 1. Rosenbrock\n"
             << " 2. Rastrigin\n"
             << " 3. Ackley\n";
-  // Only show 2D-only options when dim == 2.
-  if constexpr (dim == 2) {
+  if constexpr(dim == 2) {
     std::cout << " 4. GoldsteinPrice\n"
               << " 5. Eggholder\n"
               << " 6. Himmelblau\n";
   }
-  std::cout
-    << " 7. Custom (user-defined objective via expression or kernel file)\n"
-    << "Choice: ";
+  std::cout << " 7. Custom (user-defined objective)\n"
+            << "Choice: ";
   std::cin >> choice;
   std::cin.ignore();
 
-  switch (choice) {
-    case 1:
-      std::cout << "\n\n\tRosenbrock Function\n" << std::endl;
-      zeus::runOptimizationKernel<util::Rosenbrock<dim>, dim>(lower,
-                                                        upper,
-                                                        hostResults,
-                                                        N,
-                                                        MAX_ITER,
-                                                        PSO_ITERS,
-                                                        requiredConverged,
-                                                        "rosenbrock",
-                                                        tolerance,
-                                                        seed,
-                                                        run);
+  switch(choice) {
+    case 1: {
+      std::cout << "\n\n\tRosenbrock Function\n\n";
+      auto f = util::Rosenbrock<dim>{};
+      auto result = zeus::Zeus(
+        f,              // deduce F = util::Rosenbrock<dim>
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "rosenbrock",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 2:
-      std::cout << "\n\n\tRastrigin Function\n" << std::endl;
-      zeus::runOptimizationKernel<util::Rastrigin<dim>, dim>(lower,
-                                                       upper,
-                                                       hostResults,
-                                                       N,
-                                                       MAX_ITER,
-                                                       PSO_ITERS,
-                                                       requiredConverged,
-                                                       "rastrigin",
-                                                       tolerance,
-                                                       seed,
-                                                       run);
+    }
+    case 2: {
+      std::cout << "\n\n\tRastrigin Function\n\n";
+      auto f = util::Rastrigin<dim>{};
+      auto result = zeus::Zeus(
+        f,
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "rastrigin",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 3:
-      std::cout << "\n\n\tAckley Function\n" << std::endl;
-      zeus::runOptimizationKernel<util::Ackley<dim>, dim>(lower,
-                                                    upper,
-                                                    hostResults,
-                                                    N,
-                                                    MAX_ITER,
-                                                    PSO_ITERS,
-                                                    requiredConverged,
-                                                    "ackley",
-                                                    tolerance,
-                                                    seed,
-                                                    run);
+    }
+    case 3: {
+      std::cout << "\n\n\tAckley Function\n\n";
+      auto f = util::Ackley<dim>{};
+      auto result = zeus::Zeus(
+        f,
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "ackley",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 4:
-      if constexpr (dim != 2) {
-        std::cerr
-          << "Error: GoldsteinPrice is defined for 2 dimensions only.\n";
-      } else {
-        std::cout << "\n\n\tGoldsteinPrice Function\n" << std::endl;
-        zeus::runOptimizationKernel<util::GoldsteinPrice<dim>, dim>(lower,
-                                                              upper,
-                                                              hostResults,
-                                                              N,
-                                                              MAX_ITER,
-                                                              PSO_ITERS,
-                                                              requiredConverged,
-                                                              "goldstein",
-                                                              tolerance,
-                                                              seed,
-                                                              run);
-      }
+    }
+    case 4: if constexpr(dim == 2) {
+      std::cout << "\n\n\tGoldstein-Price Function\n\n";
+      auto f = util::GoldsteinPrice<dim>{};
+      auto result = zeus::Zeus(
+        f,
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "goldstein_price",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 5:
-      if constexpr (dim != 2) {
-        std::cerr << "Error: Eggholder is defined for 2 dimensions only.\n";
-      } else {
-        std::cout << "\n\n\tEggholder Function\n" << std::endl;
-        zeus::runOptimizationKernel<util::Eggholder<dim>, dim>(lower,
-                                                         upper,
-                                                         hostResults,
-                                                         N,
-                                                         MAX_ITER,
-                                                         PSO_ITERS,
-                                                         requiredConverged,
-                                                         "eggholder",
-                                                         tolerance,
-                                                         seed,
-                                                         run);
-      }
+    }
+    case 5: if constexpr(dim == 2) {
+      std::cout << "\n\n\tEggholder Function\n\n";
+      auto f = util::Eggholder<dim>{};
+      auto result = zeus::Zeus(
+        f,
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "eggholder",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 6:
-      if constexpr (dim != 2) {
-        std::cerr << "Error: Himmelblau is defined for 2 dimensions only.\n";
-      } else {
-        std::cout << "\n\n\tHimmelblau Function\n" << std::endl;
-        zeus::runOptimizationKernel<util::Himmelblau<dim>, dim>(lower,
-                                                          upper,
-                                                          hostResults,
-                                                          N,
-                                                          MAX_ITER,
-                                                          PSO_ITERS,
-                                                          requiredConverged,
-                                                          "himmelblau",
-                                                          tolerance,
-                                                          seed,
-                                                          run);
-      }
+    }
+    case 6: if constexpr(dim == 2) {
+      std::cout << "\n\n\tHimmelblau Function\n\n";
+      auto f = util::Himmelblau<dim>{};
+      auto result = zeus::Zeus(
+        f,
+        lo, hi,
+        hostResults,
+        N, MAX_ITER, PSO_ITERS,
+        requiredConverged,
+        "himmelblau",
+        tolerance,
+        seed,
+        run
+      );
       break;
-    case 7:
-      std::cout << "\n\n\tCustom User-Defined Function\n" << std::endl;
-      // for a more complex custom function, one option is to let the user
-      // provide a path to a cuda file and compile it at runtime.
-      // runOptimizationKernel<UserDefined<dim>, dim>(lower, upper, hostResults,
-      // hostIndices,
-      //                                             hostCoordinates, N,
-      //                                             MAX_ITER);
+    }
+    case 7: {
+      std::cout << "\n\n\tCustom Function\n\n"
+                << "Please implement a free function with signature\n"
+                << "  double myfun(const double* x)\n"
+                << "and then recompile.\n\n";
       break;
+    }
     default:
-      std::cerr << "Invalid selection!\n";
-      exit(1);
+      std::cerr << "Invalid choice\n";
   }
 }
+
 
 // #ifndef UNIT_TEST
 // #ifndef NO_MAIN
