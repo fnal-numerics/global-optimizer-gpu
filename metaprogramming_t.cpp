@@ -15,11 +15,11 @@ struct Rosen {
 
   template <class T>
   __host__ __device__ T
-  operator()(const T* x) const
+  operator()(const T* x, int DIM=d) const
   {
     T sum = T(0);
 #pragma unroll
-    for (int i = 0; i < d - 1; ++i) {
+    for (int i = 0; i < DIM-1; ++i) {
       T t1 = T(1) - x[i];
       T t2 = x[i + 1] - x[i] * x[i];
       sum += t1 * t1 + T(100) * t2 * t2;
