@@ -5,22 +5,21 @@
 #include "bfgs.cuh"
 #include "zeus.cuh"
 
-__device__ int d_stopFlag         = 0;
-__device__ int d_convergedCount   = 0;
+__device__ int d_stopFlag = 0;
+__device__ int d_convergedCount = 0;
 __device__ int d_threadsRemaining = 0;
-
 
 template <int dim>
 void
-selectAndRunOptimization(double   lower,
-                         double   upper,
-                         double*  hostResults,
-                         int      N,
-                         int      MAX_ITER,
-                         int      PSO_ITERS,
-                         int      requiredConverged,
-                         double   tolerance,
-                         int      seed,
+selectAndRunOptimization(double lower,
+                         double upper,
+                         double* hostResults,
+                         int N,
+                         int MAX_ITER,
+                         int PSO_ITERS,
+                         int requiredConverged,
+                         double tolerance,
+                         int seed,
                          const int run)
 {
   double lo = lower;
@@ -31,7 +30,7 @@ selectAndRunOptimization(double   lower,
             << " 1. Rosenbrock\n"
             << " 2. Rastrigin\n"
             << " 3. Ackley\n";
-  if constexpr(dim == 2) {
+  if constexpr (dim == 2) {
     std::cout << " 4. GoldsteinPrice\n"
               << " 5. Eggholder\n"
               << " 6. Himmelblau\n";
@@ -41,103 +40,112 @@ selectAndRunOptimization(double   lower,
   std::cin >> choice;
   std::cin.ignore();
 
-  switch(choice) {
+  switch (choice) {
     case 1: {
       std::cout << "\n\n\tRosenbrock Function\n\n";
       auto f = util::Rosenbrock<dim>{};
-      auto result = zeus::Zeus(
-        f,              // deduce F = util::Rosenbrock<dim>
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "rosenbrock",
-        tolerance,
-        seed,
-        run
-      );
+      auto result = zeus::Zeus(f, // deduce F = util::Rosenbrock<dim>
+                               lo,
+                               hi,
+                               hostResults,
+                               N,
+                               MAX_ITER,
+                               PSO_ITERS,
+                               requiredConverged,
+                               "rosenbrock",
+                               tolerance,
+                               seed,
+                               run);
       break;
     }
     case 2: {
       std::cout << "\n\n\tRastrigin Function\n\n";
       auto f = util::Rastrigin<dim>{};
-      auto result = zeus::Zeus(
-        f,
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "rastrigin",
-        tolerance,
-        seed,
-        run
-      );
+      auto result = zeus::Zeus(f,
+                               lo,
+                               hi,
+                               hostResults,
+                               N,
+                               MAX_ITER,
+                               PSO_ITERS,
+                               requiredConverged,
+                               "rastrigin",
+                               tolerance,
+                               seed,
+                               run);
       break;
     }
     case 3: {
       std::cout << "\n\n\tAckley Function\n\n";
       auto f = util::Ackley<dim>{};
-      auto result = zeus::Zeus(
-        f,
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "ackley",
-        tolerance,
-        seed,
-        run
-      );
+      auto result = zeus::Zeus(f,
+                               lo,
+                               hi,
+                               hostResults,
+                               N,
+                               MAX_ITER,
+                               PSO_ITERS,
+                               requiredConverged,
+                               "ackley",
+                               tolerance,
+                               seed,
+                               run);
       break;
     }
-    case 4: if constexpr(dim == 2) {
-      std::cout << "\n\n\tGoldstein-Price Function\n\n";
-      auto f = util::GoldsteinPrice<dim>{};
-      auto result = zeus::Zeus(
-        f,
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "goldstein_price",
-        tolerance,
-        seed,
-        run
-      );
-      break;
-    }
-    case 5: if constexpr(dim == 2) {
-      std::cout << "\n\n\tEggholder Function\n\n";
-      auto f = util::Eggholder<dim>{};
-      auto result = zeus::Zeus(
-        f,
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "eggholder",
-        tolerance,
-        seed,
-        run
-      );
-      break;
-    }
-    case 6: if constexpr(dim == 2) {
-      std::cout << "\n\n\tHimmelblau Function\n\n";
-      auto f = util::Himmelblau<dim>{};
-      auto result = zeus::Zeus(
-        f,
-        lo, hi,
-        hostResults,
-        N, MAX_ITER, PSO_ITERS,
-        requiredConverged,
-        "himmelblau",
-        tolerance,
-        seed,
-        run
-      );
-      break;
-    }
+    case 4:
+      if constexpr (dim == 2) {
+        std::cout << "\n\n\tGoldstein-Price Function\n\n";
+        auto f = util::GoldsteinPrice<dim>{};
+        auto result = zeus::Zeus(f,
+                                 lo,
+                                 hi,
+                                 hostResults,
+                                 N,
+                                 MAX_ITER,
+                                 PSO_ITERS,
+                                 requiredConverged,
+                                 "goldstein_price",
+                                 tolerance,
+                                 seed,
+                                 run);
+        break;
+      }
+    case 5:
+      if constexpr (dim == 2) {
+        std::cout << "\n\n\tEggholder Function\n\n";
+        auto f = util::Eggholder<dim>{};
+        auto result = zeus::Zeus(f,
+                                 lo,
+                                 hi,
+                                 hostResults,
+                                 N,
+                                 MAX_ITER,
+                                 PSO_ITERS,
+                                 requiredConverged,
+                                 "eggholder",
+                                 tolerance,
+                                 seed,
+                                 run);
+        break;
+      }
+    case 6:
+      if constexpr (dim == 2) {
+        std::cout << "\n\n\tHimmelblau Function\n\n";
+        auto f = util::Himmelblau<dim>{};
+        auto result = zeus::Zeus(f,
+                                 lo,
+                                 hi,
+                                 hostResults,
+                                 N,
+                                 MAX_ITER,
+                                 PSO_ITERS,
+                                 requiredConverged,
+                                 "himmelblau",
+                                 tolerance,
+                                 seed,
+                                 run);
+        break;
+      }
     case 7: {
       std::cout << "\n\n\tCustom Function\n\n"
                 << "Please implement a free function with signature\n"
@@ -149,7 +157,6 @@ selectAndRunOptimization(double   lower,
       std::cerr << "Invalid choice\n";
   }
 }
-
 
 // #ifndef UNIT_TEST
 // #ifndef NO_MAIN
