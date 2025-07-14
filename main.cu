@@ -5,9 +5,6 @@
 #include "bfgs.cuh"
 #include "zeus.cuh"
 
-__device__ int d_stopFlag = 0;
-__device__ int d_convergedCount = 0;
-__device__ int d_threadsRemaining = 0;
 
 template <int dim>
 void
@@ -39,12 +36,14 @@ selectAndRunOptimization(double lower,
             << "Choice: ";
   std::cin >> choice;
   std::cin.ignore();
-
+  std::array<double, dim> x0;
+  for(int d=0;d<dim;d++)
+    x0[d] = 0.5*(lo+hi);
   switch (choice) {
     case 1: {
       std::cout << "\n\n\tRosenbrock Function\n\n";
       auto f = util::Rosenbrock<dim>{};
-      auto result = zeus::Zeus(f, // deduce F = util::Rosenbrock<dim>
+      auto result = zeus::Zeus(f,x0, // deduce F = util::Rosenbrock<dim>
                                lo,
                                hi,
                                hostResults,
@@ -61,7 +60,7 @@ selectAndRunOptimization(double lower,
     case 2: {
       std::cout << "\n\n\tRastrigin Function\n\n";
       auto f = util::Rastrigin<dim>{};
-      auto result = zeus::Zeus(f,
+      auto result = zeus::Zeus(f,x0,
                                lo,
                                hi,
                                hostResults,
@@ -78,7 +77,7 @@ selectAndRunOptimization(double lower,
     case 3: {
       std::cout << "\n\n\tAckley Function\n\n";
       auto f = util::Ackley<dim>{};
-      auto result = zeus::Zeus(f,
+      auto result = zeus::Zeus(f,x0,
                                lo,
                                hi,
                                hostResults,
