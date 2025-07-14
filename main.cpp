@@ -188,7 +188,7 @@ main(int argc, char* argv[])
 
   // const size_t N =
   // 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-  const int dim = 10;
+  const int dim = 3;
   double hostResults[N]; // = new double[N];
   std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER
             << " dim = " << dim << std::endl;
