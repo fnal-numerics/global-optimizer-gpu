@@ -1,8 +1,10 @@
-#include "fun.h"
-#include "duals.cuh"
-#include "utils.cuh"
-#include "pso.cuh"
-#include "bfgs.cuh"
+//#include "fun.h"
+//#include "duals.cuh"
+//#include "utils.cuh"
+//#include "pso.cuh"
+//#include "bfgs.cuh"
+#include <vector>
+#include <iostream>
 #include "zeus.cuh"
 
 
