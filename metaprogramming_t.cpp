@@ -39,18 +39,26 @@ struct Rast {
     return sum;
   }
 };
-/*
-struct Gaussian {
-  private:
-    std::array<T,N> covar;// argument to the constructor
 
-  template<class T, std::size_t N>
+template <std::size_t N>
+struct Gaussian {
+  std::array<std::array<double, N>, N> C;
   __host__ __device__
-  constexpr T operator()(const std::array<T,N>& x, covar) const {
-    
+  constexpr Gaussian(std::array<std::array<double, N>, N> const& C_) : C(C_) {}
+
+  template<class T>
+  __host__ __device__
+  constexpr T operator()(std::array<T, N> const& x) const {
+    T q = T(0);
+#pragma unroll
+    for (std::size_t i = 0; i < N; ++i)
+#pragma unroll
+      for (std::size_t j = 0; j < N; ++j)
+        q += x[i] * T(C[i][j] * x[j]);
+    return exp(-q);
   }
 };
-*/
+
 
 int
 main()
@@ -78,10 +86,25 @@ main()
   std::cout << "global minimum for 3d rosenbrock: " << res3.fval << std::endl;
 
   std::array<double, 5> x5{};
-  auto res5 = zeus::Zeus(Rast{},x5, -5.12, 5.12, host, N, 10000, 25, 100, "rastrigin", 1e-8, 42, 0);
+  auto res5 = zeus::Zeus(Rast{},x5, -5.12, 5.12, host, N, 10000, 10, 100, "rastrigin", 1e-8, 42, 0);
   std::cout << "global minimum for 5d rastrigin: " << res5.fval << std::endl;
  
   // positive symmetric matrix
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
+  constexpr std::size_t D = 50;
+  using T = double;
+  std::array<std::array<T, D>, D> C{};
+  for (std::size_t i = 0; i < D; ++i)
+    for (std::size_t j = 0; j < D; ++j)
+      C[i][j] = T(i) + T(j) + T(1);
+  Gaussian<D> g{C};
+  std::array<T, D> x150{};
+  x150.fill(T(3.7));
+  T fx = g(x150);
+  std::cout << "f(x) = " << fx << std::endl;
+  std::cout << "running 150d Gaussian minimization" << std::endl; 
+  auto res150 = zeus::Zeus(g,x150, -5.12, 5.12, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
+  std::cout << "global minimum for 150d Gaussian: " << res150.fval << std::endl;
+
 }
