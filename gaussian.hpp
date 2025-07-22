@@ -19,7 +19,7 @@ public:
         C(i,j) = C_host[i][j];
     
     // push buffer to the GPU
-    C.syncHostToDevice();
+    C.syncHost2Device();
   }
 
   // device & host call-operator
