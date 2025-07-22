@@ -3,7 +3,7 @@
 #include "zeus.cuh"
 #include "duals.cuh"
 
-#include "gaussian.cuh"
+#include "gaussian.hpp"
 
 double
 square(double x)
@@ -12,6 +12,9 @@ square(double x)
 }
 
 struct Rosen {
+  Rosen(Rosen const&) = delete;
+  Rosen& operator=(Rosen const&) = delete; 
+  
   template <class T, std::size_t N>
   __host__ __device__
   constexpr T operator()(std::array<T, N>const& x) const
@@ -29,6 +32,9 @@ struct Rosen {
 
 // templated Rastrigin on T (double or Dual) and N at compile time
 struct Rast {
+  Rast(Rast const&) = delete;
+  Rast& operator=(Rast const&) = delete;
+
   template<class T, std::size_t N>
   __host__ __device__
   constexpr T operator()(const std::array<T,N>& x) const {
@@ -60,8 +66,9 @@ main()
     host[i] = 333777.0;
   }
   util::set_stack_size();
-
-  /*std::array<double,10> x10{};
+  
+#if(0)
+  std::array<double,10> x10{};
   auto res10 = zeus::Zeus(Rosen{},x10, -5.12, 5.12, host, N, 10000, 5, 100, "rosenbrock", 1e-8, 42, 0);
   std::array<double, 3> x3{};
   auto res3 = zeus::Zeus(Rosen{},x3, -5.12, 5.12, host, 1, 100, 0, 1, "rosenbrock", 1e-8, 42, 0);
@@ -71,11 +78,12 @@ main()
   std::array<double, 5> x5{};
   auto res5 = zeus::Zeus(Rast{},x5, -5.12, 5.12, host, N, 10000, 10, 100, "rastrigin", 1e-8, 42, 0);
   std::cout << "global minimum for 5d rastrigin: " << res5.fval << std::endl;
-  */
+#endif
+#if(1)
   // positive symmetric matrix
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
-  constexpr std::size_t D = 50;
+  constexpr std::size_t D = 5;
   using T = double;
   T off = T(0.2);
   std::array<std::array<T, D>, D> C;
@@ -90,7 +98,8 @@ main()
   x150.fill(T(3.7));
   T fx = g(x150);
   std::cout << "f(x) = " << fx << std::endl;
-  std::cout << "running 150d Gaussian minimization" << std::endl; 
-  auto res150 = zeus::Zeus(g,x150, -2.00, 2.00, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
-  std::cout << "global minimum for 150d Gaussian: " << res150.fval << std::endl;
+  std::cout << "running " << D << "d Gaussian minimization" << std::endl; 
+  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
+  std::cout << "global minimum for " << D << "d Gaussian: " << res150.fval << std::endl;
+#endif  
 }
