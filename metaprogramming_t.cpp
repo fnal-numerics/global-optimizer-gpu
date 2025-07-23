@@ -83,7 +83,7 @@ main()
   // positive symmetric matrix
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
-  constexpr std::size_t D = 5;
+  constexpr std::size_t D = 150;
   using T = double;
   T off = T(0.2);
   std::array<std::array<T, D>, D> C;
@@ -99,7 +99,7 @@ main()
   T fx = g(x150);
   std::cout << "f(x) = " << fx << std::endl;
   std::cout << "running " << D << "d Gaussian minimization" << std::endl; 
-  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
+  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, 10, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
   std::cout << "global minimum for " << D << "d Gaussian: " << res150.fval << std::endl;
 #endif  
 }
