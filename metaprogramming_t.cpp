@@ -50,8 +50,15 @@ struct Rast {
 };
 
 int
-main()
+main(int argc, char* argv[])
 {
+  if (argc != 3) {
+    std::cerr << "Usage " << argv[0] << "<optimization> <run>\n";
+    return 1;
+  }
+  int N = std::stoi(argv[1]);
+  int run = std::stoi(argv[2]);
+
   std::vector ys{1.5, 2.5, 3.5};
 
   auto result = zeus::fmap(square, ys);
@@ -59,8 +66,6 @@ main()
     std::cout << val << " ";
   }
   std::cout << std::endl;
-
-  int N = 13107;
   double host[N];
   for (int i = 0; i < N; i++) {
     host[i] = 333777.0;
@@ -85,7 +90,7 @@ main()
   //   
   constexpr std::size_t D = 150;
   using T = double;
-  T off = T(0.2);
+  T off = T(0.5);
   std::array<std::array<T, D>, D> C;
   for (std::size_t i = 0; i < D; ++i) {
     for (std::size_t j = 0; j < D; ++j) {
@@ -99,7 +104,7 @@ main()
   T fx = g(x150);
   std::cout << "f(x) = " << fx << std::endl;
   std::cout << "running " << D << "d Gaussian minimization" << std::endl; 
-  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, 10, 10000, 10, 100, "gaussian", 1e-8, 42, 0); 
+  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, run); 
   std::cout << "global minimum for " << D << "d Gaussian: " << res150.fval << std::endl;
 #endif  
 }
