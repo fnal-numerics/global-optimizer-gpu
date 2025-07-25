@@ -93,7 +93,7 @@ selectAndRunOptimization(double lower,
                                run);
       break;
     }
-    case 4:
+    /*case 4:
       if constexpr (dim == 2) {
         std::cout << "\n\n\tGoldstein-Price Function\n\n";
         auto f = util::GoldsteinPrice<dim>{};
@@ -153,7 +153,7 @@ selectAndRunOptimization(double lower,
                 << "  double myfun(const double* x)\n"
                 << "and then recompile.\n\n";
       break;
-    }
+    }*/
     default:
       std::cerr << "Invalid choice\n";
   }
@@ -165,7 +165,6 @@ selectAndRunOptimization(double lower,
 int
 main(int argc, char* argv[])
 {
-  printf("Production main() running\n");
   if (argc != 10) {
     std::cerr
       << "Usage: " << argv[0]
@@ -188,7 +187,7 @@ main(int argc, char* argv[])
 
   // const size_t N =
   // 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
-  const int dim = 5;
+  const int dim = 2;
   double hostResults[N]; // = new double[N];
   std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER
             << " dim = " << dim << std::endl;
