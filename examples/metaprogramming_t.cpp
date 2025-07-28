@@ -4,6 +4,10 @@
 #include "duals.cuh"
 
 #include "gaussian.hpp"
+#include "mlp.hpp"
+
+#include <cstdlib>    // for rand(), srand()
+#include <cmath>      // for exp()
 
 double
 square(double x)
