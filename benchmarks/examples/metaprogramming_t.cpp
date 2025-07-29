@@ -56,13 +56,14 @@ struct Rast {
 int
 main(int argc, char* argv[])
 {
-  if (argc != 3) {
-    std::cerr << "Usage " << argv[0] << "<optimization> <run>\n";
+  if (argc != 4) {
+    std::cerr << "Usage " << argv[0] << "<optimization> <bfgs> <run>\n";
     return 1;
   }
   int N = std::stoi(argv[1]);
-  int run = std::stoi(argv[2]);
-
+  int bfgs = std::stoi(argv[2]);
+  int run = std::stoi(argv[3]);
+  
   std::vector ys{1.5, 2.5, 3.5};
 
   auto result = zeus::fmap(square, ys);
@@ -113,8 +114,8 @@ main(int argc, char* argv[])
 #endif  
 #if(1)
   constexpr size_t In = 5;
-  constexpr size_t H = 20;
-  constexpr size_t Out = 5;
+  constexpr size_t H = 15;
+  constexpr size_t Out = 10;
   constexpr size_t P = NeuralNet<In,H,Out>::P;
 
   // toy training example
@@ -123,7 +124,7 @@ main(int argc, char* argv[])
   for(size_t i = 0; i < In; ++i)
     x0[i] = double(i);
   for(size_t k = 0; k < Out; ++k)
-    y0[k] = (std::rand()/double(RAND_MAX) - 0.5) * 0.1;
+    y0[k] = (std::rand()/double(RAND_MAX) - 0.5) * 0.5;
 
   //construct the objective 
   // copies x0, y0 to device
@@ -135,11 +136,11 @@ main(int argc, char* argv[])
   for(auto &v : theta0)
     v = (std::rand()/double(RAND_MAX) - 0.5) * 0.1;
 
-  int PSOiters = 10;
+  int PSOiters = 2;
   int requiredConverged = 10;
-  double tol = 1e-8;
+  double tol = 1e-6;
 
-  auto res = zeus::Zeus(objective, theta0 ,-2.0, 2.0,host,N, 10000, PSOiters, requiredConverged,"neural_net",tol, 42, run);
+  auto res = zeus::Zeus(objective, theta0 ,-20.0, 20.0,host,N, bfgs, PSOiters, requiredConverged,"neural_net",tol, 42, run);
   std::cout<<"final loss: "<<res.fval<<"\n";
 #endif
 }
