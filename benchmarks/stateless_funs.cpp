@@ -12,7 +12,6 @@ template <int dim>
 void
 selectAndRunOptimization(double lower,
                          double upper,
-                         double* hostResults,
                          int N,
                          int MAX_ITER,
                          int PSO_ITERS,
@@ -45,10 +44,9 @@ selectAndRunOptimization(double lower,
     case 1: {
       std::cout << "\n\n\tRosenbrock Function\n\n";
       auto f = util::Rosenbrock<dim>{};
-      auto result = zeus::Zeus(f,x0, // deduce F = util::Rosenbrock<dim>
+      auto result = zeus::Zeus(f,
                                lo,
                                hi,
-                               hostResults,
                                N,
                                MAX_ITER,
                                PSO_ITERS,
@@ -62,10 +60,9 @@ selectAndRunOptimization(double lower,
     case 2: {
       std::cout << "\n\n\tRastrigin Function\n\n";
       auto f = util::Rastrigin<dim>{};
-      auto result = zeus::Zeus(f,x0,
+      auto result = zeus::Zeus(f,
                                lo,
                                hi,
-                               hostResults,
                                N,
                                MAX_ITER,
                                PSO_ITERS,
@@ -79,10 +76,9 @@ selectAndRunOptimization(double lower,
     case 3: {
       std::cout << "\n\n\tAckley Function\n\n";
       auto f = util::Ackley<dim>{};
-      auto result = zeus::Zeus(f,x0,
+      auto result = zeus::Zeus(f,
                                lo,
                                hi,
-                               hostResults,
                                N,
                                MAX_ITER,
                                PSO_ITERS,
@@ -188,7 +184,6 @@ main(int argc, char* argv[])
   // const size_t N =
   // 128*4;//1024*128*16;//pow(10,5.5);//128*1024*3;//*1024*128;
   const int dim = 2;
-  double hostResults[N]; // = new double[N];
   std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER
             << " dim = " << dim << std::endl;
 
@@ -196,12 +191,8 @@ main(int argc, char* argv[])
   util::set_stack_size();
   char cont = 'y';
   while (cont == 'y' || cont == 'Y') {
-    for (int i = 0; i < N; i++) {
-      hostResults[i] = f0;
-    }
     selectAndRunOptimization<dim>(lower,
                                   upper,
-                                  hostResults,
                                   N,
                                   MAX_ITER,
                                   PSO_ITERS,
