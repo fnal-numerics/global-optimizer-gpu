@@ -1,5 +1,6 @@
 #include <vector>
 #include <iostream>
+#include <string>
 #include "zeus.cuh"
 #include "duals.cuh"
 
@@ -53,6 +54,15 @@ struct Rast {
   }
 };
 
+template<std::size_t D>
+double square2(std::array<double,D> const& x) {
+    double sum = 0.0;
+    for (std::size_t i = 0; i < D; ++i) {
+        sum += x[i] * x[i];
+    }
+    return sum;
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -60,7 +70,7 @@ main(int argc, char* argv[])
     std::cerr << "Usage " << argv[0] << "<optimization> <bfgs> <run>\n";
     return 1;
   }
-  int N = std::stoi(argv[1]);
+  size_t N = std::stoi(argv[1]);
   int bfgs = std::stoi(argv[2]);
   int run = std::stoi(argv[3]);
   
@@ -71,10 +81,6 @@ main(int argc, char* argv[])
     std::cout << val << " ";
   }
   std::cout << std::endl;
-  double host[N];
-  for (int i = 0; i < N; i++) {
-    host[i] = 333777.0;
-  }
   util::set_stack_size();
   
 #if(0)
@@ -89,12 +95,15 @@ main(int argc, char* argv[])
   auto res5 = zeus::Zeus(Rast{},x5, -5.12, 5.12, host, N, 10000, 10, 100, "rastrigin", 1e-8, 42, 0);
   std::cout << "global minimum for 5d rastrigin: " << res5.fval << std::endl;
 #endif
-#if(0)
+#if(1)
   // positive symmetric matrix
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
-  constexpr std::size_t D = 150;
+  auto result2 = zeus::Zeus(square2<2>,-5.0, 5.0,100,1000,100,10,"square",1e-6,42,0);
+
+  constexpr std::size_t D = 4;
   using T = double;
+  
   T off = T(0.5);
   std::array<std::array<T, D>, D> C;
   for (std::size_t i = 0; i < D; ++i) {
@@ -103,16 +112,19 @@ main(int argc, char* argv[])
     }
   }  
 
-  Gaussian<D> g{C};
-  std::array<T, D> x150{};
+  Gaussian<D> g{C}; 
+
+  /*std::array<T, D> x150{};
   x150.fill(T(3.7));
   T fx = g(x150);
   std::cout << "f(x) = " << fx << std::endl;
+  */
   std::cout << "running " << D << "d Gaussian minimization" << std::endl; 
-  auto res150 = zeus::Zeus(g,x150, -5.00, 5.00, host, N, 10000, 10, 100, "gaussian", 1e-8, 42, run); 
+  using namespace std::literals;
+  auto res150 = zeus::Zeus(g, -5.00, 5.00, N, 10000, 10, 100, "gaussian"s, 1e-8, 42, run); 
   std::cout << "global minimum for " << D << "d Gaussian: " << res150.fval << std::endl;
 #endif  
-#if(1)
+#if(0)
   constexpr size_t In = 5;
   constexpr size_t H = 15;
   constexpr size_t Out = 10;
