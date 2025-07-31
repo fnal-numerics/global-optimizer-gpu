@@ -99,7 +99,7 @@ main(int argc, char* argv[])
   // positive symmetric matrix
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
-  auto result2 = zeus::Zeus(square2<2>,-5.0, 5.0,100,1000,100,10,"square",1e-6,42,0);
+  //auto result2 = zeus::Zeus(square2<2>,-5.0, 5.0,100,1000,100,10,"square",1e-6,42,0);
 
   constexpr std::size_t D = 4;
   using T = double;
