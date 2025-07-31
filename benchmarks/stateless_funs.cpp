@@ -1,12 +1,7 @@
-//#include "fun.h"
-//#include "duals.cuh"
-//#include "utils.cuh"
-//#include "pso.cuh"
-//#include "bfgs.cuh"
 #include <vector>
 #include <iostream>
 #include "zeus.cuh"
-
+#include "fun.h"
 
 template <int dim>
 void
@@ -30,8 +25,7 @@ selectAndRunOptimization(double lower,
             << " 3. Ackley\n";
   if constexpr (dim == 2) {
     std::cout << " 4. GoldsteinPrice\n"
-              << " 5. Eggholder\n"
-              << " 6. Himmelblau\n";
+              << " 5. Himmelblau\n";
   }
   std::cout << " 7. Custom (user-defined objective)\n"
             << "Choice: ";
@@ -89,14 +83,13 @@ selectAndRunOptimization(double lower,
                                run);
       break;
     }
-    /*case 4:
+    case 4:
       if constexpr (dim == 2) {
         std::cout << "\n\n\tGoldstein-Price Function\n\n";
         auto f = util::GoldsteinPrice<dim>{};
         auto result = zeus::Zeus(f,
                                  lo,
                                  hi,
-                                 hostResults,
                                  N,
                                  MAX_ITER,
                                  PSO_ITERS,
@@ -109,30 +102,11 @@ selectAndRunOptimization(double lower,
       }
     case 5:
       if constexpr (dim == 2) {
-        std::cout << "\n\n\tEggholder Function\n\n";
-        auto f = util::Eggholder<dim>{};
-        auto result = zeus::Zeus(f,
-                                 lo,
-                                 hi,
-                                 hostResults,
-                                 N,
-                                 MAX_ITER,
-                                 PSO_ITERS,
-                                 requiredConverged,
-                                 "eggholder",
-                                 tolerance,
-                                 seed,
-                                 run);
-        break;
-      }
-    case 6:
-      if constexpr (dim == 2) {
         std::cout << "\n\n\tHimmelblau Function\n\n";
         auto f = util::Himmelblau<dim>{};
         auto result = zeus::Zeus(f,
                                  lo,
                                  hi,
-                                 hostResults,
                                  N,
                                  MAX_ITER,
                                  PSO_ITERS,
@@ -149,7 +123,7 @@ selectAndRunOptimization(double lower,
                 << "  double myfun(const double* x)\n"
                 << "and then recompile.\n\n";
       break;
-    }*/
+    }
     default:
       std::cerr << "Invalid choice\n";
   }
@@ -187,7 +161,6 @@ main(int argc, char* argv[])
   std::cout << "number of optimizations = " << N << " max_iter = " << MAX_ITER
             << " dim = " << dim << std::endl;
 
-  double f0 = 333777; // initial function value
   util::set_stack_size();
   char cont = 'y';
   while (cont == 'y' || cont == 'Y') {
@@ -205,11 +178,6 @@ main(int argc, char* argv[])
     std::cin.ignore();
   }
 
-  // for(int i=0; i<N; i++) {
-  //     hostResults[i] = f0;
-  // }
-  // selectAndRunOptimization<dim>(lower, upper, hostResults, hostIndices,
-  // hostCoordinates, N, MAX_ITER);
   return 0;
 }
 #endif
