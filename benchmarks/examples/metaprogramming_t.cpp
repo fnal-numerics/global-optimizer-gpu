@@ -58,6 +58,15 @@ T square2(std::array<T,D> const& x) {
     return sum;
 }
 
+template<std::size_t N>
+struct Foo {
+    template <typename T>
+    __host__ __device__
+    T operator()(const std::array<T,N>& x) const {
+        return T(0.5) * x[0] + x[1] * x[1];
+    }
+};
+
 int
 main(int argc, char* argv[])
 {
@@ -92,6 +101,12 @@ main(int argc, char* argv[])
   // matrix of random numbers -> transpose to itself, divide by 2.
   //   
   //auto result2 = zeus::Zeus(rast,-5.0, 5.0,100,1000,100,10,"square",1e-6,42,0);
+
+Foo<2> f;
+auto foo = Zeus(f,/*lower_bound=*/-5.0,/*upper_bound=*/5.0,/*optimization=*/1024,
+              /*bfgs_iterations=*/10000,/*pso_iterations=*/10,/*required_convergences=*/100,
+             /*function_name=*/"foo",/*tolerance=*/1e-8,/*seed=*/42,/*index_of_run=*/run);
+std::cout<< "best result: " << foo.fval <<  std::endl;
 
   constexpr std::size_t D = 4;
   using T = double;
