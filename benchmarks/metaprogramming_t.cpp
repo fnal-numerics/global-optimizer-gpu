@@ -63,8 +63,9 @@ struct Foo {
     template <typename T>
     __host__ __device__
    T operator()(const std::array<T,N>& x) const {
-        return T(0.5) * x[0] * x[0] + x[1];
-    }
+     static_assert(N==x.size());
+     return T(0.5) * x[0] * x[0] + x[1];
+   }
 };
 
 int
