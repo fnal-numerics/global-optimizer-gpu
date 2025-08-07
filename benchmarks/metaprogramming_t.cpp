@@ -60,10 +60,11 @@ T square2(std::array<T,D> const& x) {
 
 template<std::size_t N>
 struct Foo {
-    template <typename T>
+   static_assert(N >= 2, "Foo<N> requires N >= 2 because it accesses x[1]");
+
+   template <typename T>
     __host__ __device__
    T operator()(const std::array<T,N>& x) const {
-     static_assert(N==x.size());
      return T(0.5) * x[0] * x[0] + x[1];
    }
 };
